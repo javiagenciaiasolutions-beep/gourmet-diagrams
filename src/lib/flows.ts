@@ -25,9 +25,21 @@ const PROJECTS = [
         type: "action",
         title: "Parsear Título Evento",
         subtitle:
-          "Extrae código tour, número de personas y guías del título",
+          "Extrae y decodifica: código tour, número de personas, guía confirmado y guías pendientes entre paréntesis",
         api: ["n8n"],
-        details: ["Output: {tour, personas, guías}"],
+        details: [
+          "Formato título: [CódigoTour] [Personas] [Guía] ([Pendientes])",
+          "WT = Wine Tour Madrid",
+          "WTR = Wine Tour Ribera del Duero",
+          "TT = Tapas Tour Tarde",
+          "TM = Tapas Tour Mañana",
+          "CCATA = Curso de Cata",
+          "*P = Privados (excluidos, gestión manual)",
+          "Guías confirmados: sin paréntesis",
+          "Guías pendientes: entre ()",
+          "Códigos guías: TM 23=Carlos, TT 23=Carlos, TM 24=Noemí, TT 24=Carlos, TM 25=Noemí, TT 25=Noemí, TM 26=Muna, TT 26=Yolanda, TM 27=Eva, TT 27=Carlos, TM 28=Carlos, TT 28=Noemí, TM 29=Noemí, TT 29=Carlos, TM 30=Carlos, TT 30=Carlos, TM 01=Eva, TT 01=Carlos, TM 02=Noemí, TT 02=Noemí, TM 03=Rocio, TT 03=Yolanda",
+          "Output: {tour, personas, guia_confirmado, guias_pendientes[]}",
+        ],
       },
       {
         id: "c3",
@@ -60,6 +72,7 @@ const PROJECTS = [
         details: [
           "Para: equipo@gourmetmadrid.com",
           "Asunto: [URGENTE] Cupo lleno",
+          "→ Continúa a: ¿Guía pendiente?",
         ],
       },
       {
@@ -69,6 +82,9 @@ const PROJECTS = [
         title: "Continuar flujo",
         subtitle: "El flujo continúa hacia la siguiente validación",
         api: ["n8n"],
+        details: [
+          "→ Continúa a: ¿Guía pendiente?",
+        ],
       },
       {
         id: "c6",
@@ -85,7 +101,11 @@ const PROJECTS = [
         title: "Solicitar Confirmación",
         subtitle: "Envía email al siguiente guía esperando respuesta",
         api: ["Email", "n8n"],
-        details: ["Espera: Webhook 48h"],
+        details: [
+          "Espera: Webhook 48h",
+          "→ Si confirma → Confirmar Guía",
+          "→ Si no responde en 48h → Siguiente Guía (loop)",
+        ],
       },
       {
         id: "c7-no",
@@ -94,6 +114,9 @@ const PROJECTS = [
         title: "Continuar flujo",
         subtitle: "Se salta la espera de confirmación de guías",
         api: ["n8n"],
+        details: [
+          "→ Salta a: Siguiente paso",
+        ],
       },
       {
         id: "c8",
@@ -112,6 +135,7 @@ const PROJECTS = [
         api: ["Google Calendar"],
         details: [
           "Actualizar título: remove paréntesis",
+          "→ Continúa a: Notificar Confirmación",
         ],
       },
       {
@@ -121,6 +145,9 @@ const PROJECTS = [
         title: "Siguiente Guía",
         subtitle: "Vuelve a evaluar siguiente guía en cola",
         api: ["n8n"],
+        details: [
+          "→ Vuelve a Solicitar Confirmación (loop)",
+        ],
       },
       {
         id: "c10",
@@ -172,6 +199,7 @@ const PROJECTS = [
         details: [
           "Contexto: Google Docs (Drive)",
           "Prompt: Responde basándote en KB",
+          "→ Continúa a: ¿Puede responder?",
         ],
       },
       {
@@ -260,6 +288,7 @@ const PROJECTS = [
         details: [
           "Input: Fecha reserva / timestamp",
           "Output: YYYY/MM/DD",
+          "→ Continúa a: Mover a Carpeta",
         ],
       },
       {

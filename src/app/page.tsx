@@ -398,6 +398,7 @@ const FlowDiagramView = ({ steps }: { steps: any[] }) => {
                   <FlowStep step={item.no} isBranch />
                 </div>
               </div>
+              <Connector />
             </>
           ) : (
             <>
