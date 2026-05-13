@@ -242,9 +242,27 @@ const FlowStep = ({ step, isBranch = false }: { step: any; isBranch?: boolean })
       color: "border-[#10B981]",
       bg: "bg-[#064E3B]",
     },
+    divider: {
+      emoji: "",
+      label: "",
+      color: "border-transparent",
+      bg: "bg-transparent",
+    },
   };
 
   const current = config[step.type] || config.action;
+
+  if (step.type === "divider") {
+    return (
+      <div className="flex items-center gap-4 py-2 max-w-4xl mx-auto">
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#2B4CFF44] to-transparent"></div>
+        <span className="text-[9px] font-bold text-[#2B4CFF] tracking-[0.2em] uppercase whitespace-nowrap bg-[#0d1b2a] px-3">
+          {step.title}
+        </span>
+        <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#2B4CFF44] to-transparent"></div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -413,7 +431,7 @@ const FlowDiagramView = ({ steps }: { steps: any[] }) => {
           ) : (
             <>
               <FlowStep step={item} />
-              <Connector />
+              {item.type !== "divider" && <Connector />}
             </>
           )}
         </div>
