@@ -297,6 +297,16 @@ const FlowStep = ({ step, isBranch = false }: { step: any; isBranch?: boolean })
               <p className="text-sm text-slate-400 mt-1 leading-relaxed">
                 {step.subtitle}
               </p>
+              {step.continuation && (
+                <p className={cn(
+                  "text-[10px] font-bold mt-2 tracking-tight",
+                  step.continuation.startsWith("◼")
+                    ? "text-slate-500"
+                    : "text-[#2B4CFF]"
+                )}>
+                  {step.continuation}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex flex-col items-end gap-3 shrink-0">
