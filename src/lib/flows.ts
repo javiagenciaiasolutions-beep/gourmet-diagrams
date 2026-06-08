@@ -3,10 +3,26 @@ const PROJECTS = [
     id: "01",
     title: "Automatización Calendar",
     description:
-      "Sincronización en tiempo real entre Turitop y Google Calendar con notificaciones automáticas a guías.",
+      "Sincronización en tiempo real entre Turitop y Google Calendar con notificaciones automáticas a guías. Dispone de dos puntos de entrada: webhook Turitop y modificaciones detectadas desde Clasificación Emails (Get Your Guide).",
     icon: "📅",
     apis: ["Turitop", "Google Calendar", "n8n", "Email", "WhatsApp"],
     steps: [
+      {
+        id: "c-entry-mod",
+        type: "trigger",
+        title: "Webhook Modificación desde Clasificación",
+        subtitle:
+          "Punto de entrada alternativo. Recibe datos desde cl-calendar del flujo Clasificación cuando se detecta una modificación vía Get Your Guide.",
+        api: ["n8n"],
+        details: [
+          "Disparado desde: cl-calendar (Flujo Clasificación Emails)",
+          "Body: { codigo_reserva, tour_code, personas_nuevas, fecha, actividad }",
+          "El código de reserva es el mismo que el del email Turitop original",
+          "Este webhook contiene los DATOS CORREGIDOS (2º email Turitop)",
+          "El 1er email Turitop ya fue marcado como 'superseded' en la BD",
+        ],
+        continuation: "→ Siguiente: Parsear Título Evento",
+      },
       {
         id: "c1",
         type: "trigger",
@@ -22,6 +38,7 @@ const PROJECTS = [
           "cupo_total = 30 (capacidad máxima actividad)",
           "cupo_por_guía = máx personas por guía (ej: 15)",
         ],
+        continuation: "→ Siguiente: Parsear Título Evento",
       },
       {
         id: "c2",
@@ -267,10 +284,13 @@ const PROJECTS = [
     id: "03",
     title: "Clasificación Emails",
     description:
-      "Clasifica automáticamente tickets de Turitop en carpetas por día/mes/año.",
+      "Clasifica emails de Turitop por día y actividad, procesa modificaciones de Get Your Guide con LLM, concilia reservas duplicadas y actualiza Calendar automáticamente.",
     icon: "📁",
-    apis: ["Email", "n8n"],
+    apis: ["Email", "n8n", "IA", "n8n_database", "Google Calendar"],
     steps: [
+      // ═══════════════════════════════════════════════════════
+      // SECCIÓN 1: RECEPCIÓN Y FILTRADO
+      // ═══════════════════════════════════════════════════════
       {
         id: "cl1",
         type: "trigger",
@@ -287,46 +307,253 @@ const PROJECTS = [
         id: "cl2",
         type: "decision",
         title: "¿Es ticket Turitop?",
-        subtitle: "Detecta emails del sistema de reservas",
+        subtitle: "Detecta emails del sistema de reservas Turitop",
         api: ["n8n"],
         details: [
           "Filtro: From @turitop.com",
-          "Asunto: Booking confirmation, cancel...",
+          "Asunto: Booking confirmation, cancel, modify...",
         ],
       },
       {
         id: "cl2-yes",
         type: "branch_yes",
         branchLabel: "SÍ — Ticket Turitop",
-        title: "Extraer Fecha",
-        subtitle: "Obtiene fecha para clasificar",
+        title: "Es Turitop",
+        subtitle: "El email es de Turitop. Se procede a clasificar por día y actividad.",
         api: ["n8n"],
-        details: [
-          "Input: Fecha reserva / timestamp",
-          "Output: YYYY/MM/DD",
-        ],
-        continuation: "→ Siguiente: Mover a Carpeta",
+        continuation: "→ Siguiente: Extraer Fecha y Actividad",
       },
       {
         id: "cl2-no",
         type: "branch_no",
-        branchLabel: "NO — Otro email",
-        title: "Otro email",
-        subtitle: "No se procesa, permanece en inbox",
-        api: [],
-        continuation: "◼ Finaliza aquí",
+        branchLabel: "NO — No es Turitop",
+        title: "Evaluar Get Your Guide",
+        subtitle: "No es Turitop. Se comprueba si es email de Get Your Guide (modificación).",
+        api: ["n8n"],
+        continuation: "→ Siguiente: ¿Es Get Your Guide?",
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // SECCIÓN 2: CLASIFICACIÓN POR DÍAS Y ACTIVIDADES
+      // ═══════════════════════════════════════════════════════
+      {
+        id: "cl-divider-1",
+        type: "divider",
+        title: "📂 Sección 2 — Clasificación por Días y Actividades",
       },
       {
         id: "cl3",
         type: "action",
-        title: "Mover a Carpeta",
-        subtitle: "Clasifica en carpeta según fecha",
-        api: ["Email"],
+        title: "Extraer Fecha y Actividad",
+        subtitle:
+          "Obtiene el día del tour y el código de actividad desde el contenido del email. Consulta la nomenclatura del calendario/Excel compartido.",
+        api: ["n8n"],
         details: [
-          "Gmail: Etiquetas año/mes/día",
-          "IMAP: Turitop/2025/05/11",
+          "Input: cuerpo del email Turitop",
+          "Extraer: día del tour, código de actividad (WT, TT, TM, WTR, CCATA)",
+          "Consultar nomenclatura oficial del calendario compartido",
+          "Output: { dia: 1, codigo_actividad: 'WT', fecha: '2025/06/08' }",
+          "Si hay múltiples actividades el mismo día, cada una tiene su propia carpeta",
+        ],
+        continuation: "→ Siguiente: Clasificar por Día-Actividad",
+      },
+      {
+        id: "cl4",
+        type: "action",
+        title: "Clasificar por Día-Actividad",
+        subtitle:
+          "Copia el email (no lo mueve) a la carpeta del día-actividad correspondiente. El original permanece en inbox con etiqueta 'Recibidos'.",
+        api: ["Email", "n8n"],
+        details: [
+          "Acción: COPY (no MOVE)",
+          "Destino 1: Bandeja de entrada — etiqueta 'Recibidos' (implementado por Kevin)",
+          "Destino 2: Carpeta {Año}/{nº-día}-{CódigoActividad}/",
+          "Ejemplo: 2025/1-WT/ , 2025/2-TT/",
+          "Gmail: múltiples labels (INBOX + label día-actividad)",
+          "IMAP: COPY a folder en lugar de MOVE",
+          "Nomenclatura según calendario/Excel oficial: {nº_día}-{Actividad}",
+        ],
+        continuation: "→ Siguiente: ¿Es reemplazo de reserva modificada?",
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // SECCIÓN 3: VERIFICACIÓN DE REEMPLAZO (solo Turitop)
+      // ═══════════════════════════════════════════════════════
+      {
+        id: "cl-divider-2",
+        type: "divider",
+        title: "🔄 Sección 3 — Verificación de Reemplazo (2º email Turitop)",
+      },
+      {
+        id: "cl-replace",
+        type: "decision",
+        title: "¿Es reemplazo de reserva modificada?",
+        subtitle:
+          "Busca en BD si existe un email Turitop con el mismo código de reserva marcado como 'superseded' por Get Your Guide.",
+        api: ["n8n", "n8n_database"],
+        details: [
+          "Query BD: SELECT * FROM emails_turitop WHERE codigo_reserva = X AND estado = 'superseded'",
+          "Si existe → este 2º email Turitop es el reemplazo del 1º",
+          "Si no existe → es una reserva normal, primer email Turitop sin modificación",
+          "El código de reserva es el MISMO en los 3 emails (Turitop1, GYG, Turitop2)",
+        ],
+      },
+      {
+        id: "cl-replace-yes",
+        type: "branch_yes",
+        branchLabel: "SÍ — Es reemplazo",
+        title: "Actualizar Google Calendar con datos corregidos",
+        subtitle:
+          "Este 2º email Turitop contiene los datos corregidos. Se actualiza Calendar con la nueva información (personas, guías, etc.)",
+        api: ["Google Calendar", "n8n_database", "n8n"],
+        details: [
+          "BD: UPDATE emails_turitop SET estado = 'vigente', version = 2 WHERE codigo_reserva = X",
+          "BD: Marcar 2º email como la versión válida",
+          "Disparar actualización en Google Calendar con los nuevos datos",
+          "Endpoint: POST /webhook/calendar-mod (c-entry-mod en flujo Calendar)",
+          "Body: { codigo_reserva, tour_code, personas_nuevas, fecha, actividad }",
+          "El calendario reflejará SOLO los datos del 2º email (ej: 5 pax, no 4+5=9)",
+        ],
+        continuation: "◼ Finaliza aquí — Calendar actualizado",
+      },
+      {
+        id: "cl-replace-no",
+        type: "branch_no",
+        branchLabel: "NO — Reserva normal",
+        title: "Reserva original sin modificación",
+        subtitle: "No hay modificaciones previas. Este es el primer email Turitop para esta reserva.",
+        api: ["n8n_database"],
+        details: [
+          "BD: INSERT emails_turitop SET codigo_reserva, version = 1, estado = 'vigente'",
+          "No se necesita actualizar Calendar (ya se maneja por webhook Turitop)",
         ],
         continuation: "◼ Finaliza aquí",
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // SECCIÓN 4: PROCESAMIENTO GET YOUR GUIDE
+      // ═══════════════════════════════════════════════════════
+      {
+        id: "cl-divider-3",
+        type: "divider",
+        title: "📨 Sección 4 — Procesamiento Get Your Guide (Modificaciones)",
+      },
+      {
+        id: "cl2-ggy",
+        type: "decision",
+        title: "¿Es Get Your Guide?",
+        subtitle: "Detecta si el email proviene de Get Your Guide (sistema de modificaciones/cancelaciones)",
+        api: ["n8n"],
+        details: [
+          "Filtro: From @getyourguide.com",
+          "Asunto: modification, cancellation, change...",
+          "Get Your Guide envía emails cuando el cliente modifica o cancela una reserva",
+          "Este email SIEMPRE va precedido de un email Turitop (original) y seguido de otro Turitop (actualizado)",
+        ],
+      },
+      {
+        id: "cl2-ggy-yes",
+        type: "branch_yes",
+        branchLabel: "SÍ — Get Your Guide",
+        title: "Iniciar procesamiento",
+        subtitle: "Email de modificación detectado. Se procesa con LLM para extraer los detalles del cambio.",
+        api: ["n8n"],
+        continuation: "→ Siguiente: LLM Procesar Get Your Guide",
+      },
+      {
+        id: "cl2-ggy-no",
+        type: "branch_no",
+        branchLabel: "NO — Otro email",
+        title: "Ignorar email",
+        subtitle: "No es Turitop ni Get Your Guide. El email permanece en inbox sin procesar.",
+        api: [],
+        continuation: "◼ Finaliza aquí",
+      },
+      {
+        id: "cl5",
+        type: "action",
+        title: "LLM Procesar Get Your Guide",
+        subtitle:
+          "Analiza el contenido del email de Get Your Guide con IA para extraer código de reserva, tipo de modificación y datos modificados.",
+        api: ["IA", "n8n"],
+        details: [
+          "Input: cuerpo completo del email Get Your Guide",
+          "Prompt: 'Extrae del siguiente email de Get Your Guide: código de reserva, tipo de modificación (cancelación / cambio de personas / cambio de actividad), valores antiguos y nuevos. Email: {contenido}'",
+          "Output: {",
+          "  codigo_reserva: string,",
+          "  tipo_modificacion: 'cancelacion' | 'cambio_personas' | 'cambio_actividad' | 'otro',",
+          "  datos_modificados: { campo, valor_anterior, valor_nuevo }",
+          "}",
+          "El código de reserva es el MISMO que en los emails Turitop asociados",
+        ],
+        continuation: "→ Siguiente: ¿Código de reserva coincide?",
+      },
+      {
+        id: "cl6",
+        type: "decision",
+        title: "¿Código de reserva coincide?",
+        subtitle:
+          "Busca en la BD si existe un email Turitop previo con el mismo código de reserva extraído por el LLM.",
+        api: ["n8n", "n8n_database"],
+        details: [
+          "Query BD: SELECT * FROM emails_turitop WHERE codigo_reserva = {codigo_reserva} AND version = 1",
+          "Si existe → Hay un 1er email Turitop que debe marcarse como 'superseded'",
+          "Si no existe → No se encuentra la reserva original. Posible error o email huérfano.",
+          "Output: { existe_reserva_original: bool, reserva_original: { personas, fecha, actividad } }",
+        ],
+      },
+      {
+        id: "cl6-yes",
+        type: "branch_yes",
+        branchLabel: "SÍ — Reserva encontrada",
+        title: "Marcar 1er Turitop como superseded",
+        subtitle:
+          "El 1er email Turitop con este código de reserva queda descartado. Cuando llegue el 2º Turitop, se tratará como reemplazo.",
+        api: ["n8n_database", "n8n"],
+        details: [
+          "BD: UPDATE emails_turitop SET estado = 'superseded' WHERE codigo_reserva = X AND version = 1",
+          "El 1er Turitop deja de contar para estadísticas, cupos, etc.",
+          "Cuando llegue el 2º email Turitop (con los datos actualizados):",
+          "  - cl-replace detectará el flag 'superseded'",
+          "  - Se actualizará Calendar con los nuevos datos",
+          "  - Solo el 2º email será la versión vigente",
+        ],
+        continuation: "→ Siguiente: Notificar modificación al equipo",
+      },
+      {
+        id: "cl6-no",
+        type: "branch_no",
+        branchLabel: "NO — Sin referencia",
+        title: "Notificar modificación sin referencia",
+        subtitle: "No se encuentra la reserva original. Se notifica al equipo para revisión manual.",
+        api: ["Email"],
+        details: [
+          "Para: equipo@gourmetmadrid.com",
+          "Asunto: [SIN REFERENCIA] Modificación Get Your Guide sin reserva original",
+          "Contenido: código de reserva extraído, tipo de modificación, datos del email",
+          "Acción: El equipo debe localizar la reserva manualmente",
+        ],
+        continuation: "◼ Finaliza aquí",
+      },
+      {
+        id: "cl7",
+        type: "action",
+        title: "Notificar modificación al equipo",
+        subtitle:
+          "Envía un mensaje interno al equipo con los detalles de la modificación detectada por Get Your Guide.",
+        api: ["Email", "n8n"],
+        details: [
+          "Para: equipo@gourmetmadrid.com",
+          "Asunto: [MODIFICACIÓN] Reserva {código} - {tipo_modificación}",
+          "Contenido del email:",
+          "  - Código de reserva: {codigo_reserva}",
+          "  - Tipo de modificación: {tipo_modificacion}",
+          "  - Cambios: {campo}: {valor_anterior} → {valor_nuevo}",
+          "  - Fecha del tour: {fecha}",
+          "  - Actividad: {actividad}",
+          "Nota importante: El calendario se actualizará automáticamente cuando llegue el 2º email Turitop con los datos corregidos",
+        ],
+        continuation: "◼ Finaliza aquí — Esperando 2º email Turitop",
       },
     ],
   },

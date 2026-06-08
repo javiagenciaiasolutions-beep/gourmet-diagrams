@@ -29,6 +29,8 @@ const ApiBadge = ({ name }: { name: string }) => {
     Email: { label: "Email", color: "bg-[#8B5CF6]" },
     "Google Docs": { label: "G-Docs", color: "bg-[#4285F4]" },
     IA: { label: "IA", color: "bg-[#8B5CF6]" },
+    WhatsApp: { label: "WhatsApp", color: "bg-[#25D366]" },
+    n8n_database: { label: "DB", color: "bg-[#F59E0B]" },
   };
 
   const info = mapping[name] || { label: name, color: "bg-slate-700" };
