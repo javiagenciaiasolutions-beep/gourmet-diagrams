@@ -1,0 +1,784 @@
+{
+  "name": "Turitop → Calendar Sync + Gestión Guías",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "turitop-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "93f962bb-0a2b-4447-a846-92fe97ddc4a1",
+      "name": "Webhook Turitop",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -5296,
+        1200
+      ],
+      "webhookId": "turitop-webhook-001"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "calendar-mod",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Webhook Calendar Mod",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -5296,
+        1400
+      ],
+      "webhookId": "calendar-mod-webhook-001"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"modification_received\", \"timestamp\": \"{{ $now.toISO() }}\" }",
+        "options": {}
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Responder OK Mod",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -5072,
+        1496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== PARSEAR DATOS DE MODIFICACIÓN DESDE CLASSIFICATION =====\n// Este webhook recibe modificaciones del workflow de Clasificación\n// cuando una reserva en Turitop fue modificada (booking.booking.modified)\n\nconst body = $input.first().json.body || $input.first().json;\n\n// El payload viene del Classification v2 con formato:\n// { originalBookingId, newBookingId, tourCode, eventDate, newPersonas, eventType, clientName, clientEmail }\n\nconst eventType = 'modify'; // Siempre modify para este webhook\nconst bookingId = body.newBookingId || body.bookingId || `MOD-${Date.now()}`;\nconst originalBookingId = body.originalBookingId || '';\nconst tourCode = body.tourCode || '';\nconst eventDate = body.eventDate || '';\nconst newPersonas = parseInt(body.newPersonas || 0);\nconst clienteNombre = body.clientName || '';\nconst clienteEmail = body.clientEmail || '';\nconst clienteTelefono = body.clientPhone || '';\n\n// Mapeo de tour codes a product_short_id (reutilizar del mapeo existente)\nconst TOUR_MAP_REVERSE = {\n  'TM': 'P1', 'TT': 'P2', 'WT': 'P3',\n  'WTR': 'P4', 'CCATA': 'P5'\n};\nconst productId = TOUR_MAP_REVERSE[tourCode] || tourCode;\n\n// Timestamp\nconst timestamp = $now.toISO();\n\nreturn [{\n  json: {\n    eventType,\n    bookingId,\n    originalBookingId,\n    productId,\n    tourCode,\n    fecha: eventDate,\n    hora: '',\n    startISO: '',\n    endISO: '',\n    adultos: newPersonas,\n    ninos: 0,\n    totalPersonas: newPersonas,\n    clienteNombre,\n    clienteEmail,\n    clienteTelefono,\n    notas: `Modificación desde Clasificación. Original: ${originalBookingId}`,\n    timestamp,\n    isFromClassification: true\n  }\n}];"
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Parsear Datos Mod",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5072,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"received\", \"timestamp\": \"{{ $now.toISO() }}\" }",
+        "options": {}
+      },
+      "id": "5a9b1028-b091-4423-a70f-ed1d7a336ec0",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -5072,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== PARSEAR DATOS DEL WEBHOOK TURITOP =====\nconst body = $input.first().json.body || $input.first().json;\n\n// --- Tipo de evento ---\nconst eventType = body.event_type || body.type || 'booking';\n\n// --- IDs ---\nconst productId = body.product_short_id || body.data?.product_short_id || '';\nconst bookingId = body.booking_id || body.id || `BK-${Date.now()}`;\n\n// --- Fecha y hora del evento ---\nlet fecha = '', hora = '', startISO = '', endISO = '';\n\nif (body.data?.events?.[0]) {\n  const ev = body.data.events[0];\n  const dt = DateTime.fromSeconds(ev.time, { zone: 'Europe/Madrid' });\n  fecha = dt.toFormat('yyyy-MM-dd');\n  hora = dt.toFormat('HH:mm');\n  startISO = ev.time_iso8601 || dt.toISO();\n  endISO = dt.plus({ hours: 3 }).toISO();\n} else if (body.datetime || body.date) {\n  const dt = DateTime.fromISO(body.datetime || body.date, { zone: 'Europe/Madrid' });\n  fecha = dt.toFormat('yyyy-MM-dd');\n  hora = dt.toFormat('HH:mm');\n  startISO = dt.toISO();\n  endISO = dt.plus({ hours: 3 }).toISO();\n}\n\n// --- Personas ---\nconst adultos = parseInt(body.adults || body.adultos || 0);\nconst ninos = parseInt(body.children || body.ninos || 0);\nconst totalPersonas = parseInt(body.personas || body.pax || body.seats || adultos + ninos || 0);\n\n// --- Tour code (mapeo configurable) ---\n// ⚠️ AJUSTAR según los product_short_id reales de Turitop\nconst TOUR_MAP = {\n  'P1': 'TM', 'P2': 'TT', 'P3': 'WT',\n  'P4': 'WTR', 'P5': 'CCATA'\n};\nconst tourCode = body.tour_code || TOUR_MAP[productId] || productId;\n\n// --- Es privado? ---\nconst esPrivado = tourCode.endsWith('P') || (body.is_private === true);\n\n// --- Datos del cliente ---\nconst clienteNombre = body.customer_name || body.nombre || '';\nconst clienteEmail = body.customer_email || body.email || '';\nconst clienteTelefono = body.customer_phone || body.telefono || '';\n\n// --- Notas ---\nconst notas = body.notes || body.notas || '';\n\nreturn [{\n  json: {\n    eventType,\n    productId,\n    bookingId,\n    tourCode,\n    esPrivado,\n    fecha,\n    hora,\n    startISO,\n    endISO,\n    totalPersonas,\n    adultos,\n    ninos,\n    clienteNombre,\n    clienteEmail,\n    clienteTelefono,\n    notas,\n    timestamp: DateTime.now().setZone('Europe/Madrid').toISO()\n  }\n}];"
+      },
+      "id": "8046eb6e-a8df-4ceb-b4df-17a762de9ed5",
+      "name": "Parsear Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5072,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Eventos"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "product_short_id",
+              "lookupValue": "={{ $json.productId }}"
+            },
+            {
+              "lookupColumn": "fecha",
+              "lookupValue": "={{ $json.fecha }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8a71c393-e941-4261-902a-aba89a206d51",
+      "name": "Buscar Evento en Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -4848,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== EVALUAR RESULTADO DEL LOOKUP =====\nconst items = $input.all();\nconst parseData = $node[\"Parsear Datos\"].json;\n\nconst sheetRow = items[0]?.json || {};\nconst hasCalendarId = !!sheetRow.calendar_event_id;\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId: sheetRow.calendar_event_id || '',\n    eventoExiste: hasCalendarId,\n    currentPersonas: parseInt(sheetRow.total_personas || 0),\n    cupoTotal: parseInt(sheetRow.cupo_total || 30),\n    cupoPorGuia: parseInt(sheetRow.cupo_por_guia || 15),\n    guiaConfirmado: sheetRow.guia_confirmado || '',\n    guiasPendientes: sheetRow.guias_pendientes || '',\n    statusEvento: sheetRow.status || 'open',\n    rowNumber: sheetRow['__rowNumber'] || ''\n  }\n}];"
+      },
+      "id": "aae9b433-a941-414b-916b-a48918e0fafc",
+      "name": "Evaluar Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4624,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-evento-existe",
+              "leftValue": "={{ $json.eventoExiste }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "baf1149d-4de2-4cd5-b22d-1a2b4a615a00",
+      "name": "Evento Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -4400,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "mode": "id",
+          "value": "=REPLACE_CON_CALENDAR_ID"
+        },
+        "start": "={{ $node[\"Parsear Datos\"].json.startISO }}",
+        "end": "={{ $node[\"Parsear Datos\"].json.endISO }}",
+        "additionalFields": {
+          "description": "=Tour: {{ $node[\"Parsear Datos\"].json.tourCode }}\nPersonas: {{ $node[\"Parsear Datos\"].json.totalPersonas }}\nProducto Turitop: {{ $node[\"Parsear Datos\"].json.productId }}\nFecha: {{ $node[\"Parsear Datos\"].json.fecha }} {{ $node[\"Parsear Datos\"].json.hora }}\n---\nEvento creado automáticamente por n8n",
+          "location": "Madrid",
+          "summary": "={{ $node[\"Parsear Datos\"].json.tourCode + ' ' + $node[\"Parsear Datos\"].json.totalPersonas }}"
+        }
+      },
+      "id": "4b0e8a58-7450-4ea7-8c00-6132f085880f",
+      "name": "Crear Evento Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -4176,
+        1184
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Eventos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product_short_id": "={{ $node[\"Parsear Datos\"].json.productId }}",
+            "tour_code": "={{ $node[\"Parsear Datos\"].json.tourCode }}",
+            "fecha": "={{ $node[\"Parsear Datos\"].json.fecha }}",
+            "hora": "={{ $node[\"Parsear Datos\"].json.hora }}",
+            "calendar_event_id": "={{ $json.id }}",
+            "total_personas": "={{ $node[\"Parsear Datos\"].json.totalPersonas }}",
+            "cupo_total": "30",
+            "cupo_por_guia": "15",
+            "guia_confirmado": "",
+            "guias_pendientes": "",
+            "status": "open"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "f136ffcb-09e8-4f46-ba27-caa7bb66edad",
+      "name": "Registrar Mapa Evento",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3952,
+        1184
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "317wCEepMY6V0jze",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONSOLIDAR DATOS DE AMBOS CAMINOS =====\n// Camino A (TRUE): evento existía → viene de Evaluar Lookup\n// Camino B (FALSE): evento nuevo → viene de Registrar Mapa Evento\n//   pero el calendarEventId lo tomamos de Crear Evento Calendar\n\nconst item = $input.first().json;\nconst parseData = $node[\"Parsear Datos\"].json;\n\nlet calendarEventId = '';\nlet currentPersonas = 0;\nlet cupoTotal = 30;\nlet cupoPorGuia = 15;\nlet guiaConfirmado = '';\nlet guiasPendientes = '';\n\nif (item.eventoExiste === true || item.calendarEventId) {\n  // Camino A: evento existente, datos completos desde el Sheet\n  calendarEventId = item.calendarEventId || '';\n  currentPersonas = parseInt(item.currentPersonas || 0);\n  cupoTotal = parseInt(item.cupoTotal || 30);\n  cupoPorGuia = parseInt(item.cupoPorGuia || 15);\n  guiaConfirmado = item.guiaConfirmado || '';\n  guiasPendientes = item.guiasPendientes || '';\n} else {\n  // Camino B: evento recién creado\n  // El ID del evento Calendar viene del nodo Crear Evento Calendar\n  try {\n    calendarEventId = $node[\"Crear Evento Calendar\"].json.id || '';\n  } catch(e) {\n    calendarEventId = '';\n  }\n  currentPersonas = 0;\n  cupoTotal = 30;\n  cupoPorGuia = 15;\n  guiaConfirmado = '';\n  guiasPendientes = '';\n}\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId,\n    currentPersonas,\n    cupoTotal,\n    cupoPorGuia,\n    guiaConfirmado,\n    guiasPendientes\n  }\n}];"
+      },
+      "id": "ec8f8cb8-d782-4298-b025-0756647454eb",
+      "name": "Consolidar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3728,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Reservas"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $json.bookingId }}",
+            "product_short_id": "={{ $json.productId }}",
+            "tour_code": "={{ $json.tourCode }}",
+            "fecha": "={{ $json.fecha }}",
+            "tipo_evento": "={{ $json.eventType }}",
+            "adultos": "={{ $json.adultos }}",
+            "ninos": "={{ $json.ninos }}",
+            "total_personas": "={{ $json.totalPersonas }}",
+            "cliente_nombre": "={{ $json.clienteNombre }}",
+            "cliente_email": "={{ $json.clienteEmail }}",
+            "cliente_telefono": "={{ $json.clienteTelefono }}",
+            "notas": "={{ $json.notas }}",
+            "timestamp": "={{ $json.timestamp }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "12704cd4-a424-465b-ac0a-58555147449f",
+      "name": "Registrar Reserva",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3504,
+        1104
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "317wCEepMY6V0jze",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CALCULAR CUPOS, TÍTULO Y VALIDACIONES =====\nconst parseData = $node[\"Consolidar Datos\"].json;\n\nconst eventType = parseData.eventType;\nconst currentTotal = parseData.currentPersonas;\nconst newPersonas = parseData.totalPersonas;\n\n// Calcular nuevo total según tipo de evento\nlet updatedTotal;\nswitch (eventType) {\n  case 'cancel':\n    updatedTotal = Math.max(0, currentTotal - newPersonas);\n    break;\n  case 'modify': {\n    // Para modificaciones, restamos reserva anterior y sumamos nueva\n    // El originalBookingId viene del Classification workflow\n    const originalBookingId = parseData.originalBookingId || '';\n    let originalPersonas = parseData.originalPersonas || 0;\n    \n    // Si no tenemos originalPersonas, intentamos buscar en Reservas\n    if (originalBookingId && !originalPersonas) {\n      // En producción, aquí haríamos lookup en Google Sheets\n      // Por ahora usamos la diferencia directa si está disponible\n      originalPersonas = parseData.originalPersonas || 0;\n    }\n    \n    // Lógica: restar reserva anterior, sumar nueva\n    updatedTotal = Math.max(0, currentTotal - originalPersonas + newPersonas);\n    break;\n  }\n  default: // booking\n    updatedTotal = currentTotal + newPersonas;\n}\n\nconst cupoTotal = parseData.cupoTotal;\nconst cupoPorGuia = parseData.cupoPorGuia;\nconst guiaConfirmado = parseData.guiaConfirmado;\nconst guiasPendientes = parseData.guiasPendientes;\n\n// Guías\nconst numGuiasConfirmados = guiaConfirmado ? 1 : 0;\nconst listaPendientes = guiasPendientes ? guiasPendientes.split(',').map(g => g.trim()) : [];\nconst numGuiasTotal = numGuiasConfirmados + listaPendientes.length;\nconst guiasNecesarios = Math.ceil(updatedTotal / cupoPorGuia);\n\n// Flags de validación\nconst cupoTotalAlcanzado = updatedTotal >= cupoTotal;\nconst cupoGuiaSuperado = updatedTotal > (cupoPorGuia * Math.max(numGuiasConfirmados, 1));\nconst hayPendientes = listaPendientes.length > 0;\nconst necesitaMasGuias = guiasNecesarios > numGuiasTotal;\n\n// Título del evento en Calendar\nlet nuevoTitulo = `${parseData.tourCode} ${updatedTotal}`;\nif (guiaConfirmado) nuevoTitulo += ` ${guiaConfirmado}`;\nif (hayPendientes) nuevoTitulo += ` (${guiasPendientes})`;\n\n// Descripción detallada\nconst descripcion = [\n  `📊 Personas: ${updatedTotal}/${cupoTotal}`,\n  `👤 Guía confirmado: ${guiaConfirmado || 'Sin asignar'}`,\n  `⏳ Guías pendientes: ${guiasPendientes || 'Ninguno'}`,\n  `🔢 Guías necesarios: ${guiasNecesarios}`,\n  `📦 Producto Turitop: ${parseData.productId}`,\n  `---`,\n  `Última reserva: ${parseData.clienteNombre} (${newPersonas} pax)`,\n  `Actualizado: ${parseData.timestamp}`\n].join('\\n');\n\nreturn [{\n  json: {\n    ...parseData,\n    updatedTotal,\n    cupoTotalAlcanzado,\n    cupoGuiaSuperado,\n    necesitaMasGuias,\n    hayPendientes,\n    guiasNecesarios,\n    nuevoTitulo,\n    descripcion,\n    listaPendientes\n  }\n}];"
+      },
+      "id": "e5bb088d-4bb5-4530-9661-3f9149040834",
+      "name": "Calcular Cupos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3280,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Eventos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product_short_id": "={{ $json.productId }}",
+            "fecha": "={{ $json.fecha }}",
+            "total_personas": "={{ $json.updatedTotal }}",
+            "status": "={{ $json.cupoTotalAlcanzado ? 'full' : 'open' }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "31186f98-0ada-4289-9bab-d97f36feef00",
+      "name": "Actualizar Totales Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -3056,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "calendar": {
+          "mode": "id",
+          "value": "=REPLACE_CON_CALENDAR_ID"
+        },
+        "eventId": "={{ $node[\"Calcular Cupos\"].json.calendarEventId }}",
+        "updateFields": {
+          "description": "={{ $node[\"Calcular Cupos\"].json.descripcion }}",
+          "summary": "={{ $node[\"Calcular Cupos\"].json.nuevoTitulo }}"
+        }
+      },
+      "id": "3fef6cb4-12a9-4a7d-a1ee-de46a5b7aa5f",
+      "name": "Actualizar Evento Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        -2832,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-cupo-total",
+              "leftValue": "={{ $node[\"Calcular Cupos\"].json.cupoTotalAlcanzado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e8190493-0d93-4bd5-b65d-db38682d6c85",
+      "name": "Cupo Total Completo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2608,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=🔴 [URGENTE] Cupo completo — {{ $node[\"Calcular Cupos\"].json.tourCode }} {{ $node[\"Calcular Cupos\"].json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#e74c3c;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">🔴 CUPO TOTAL ALCANZADO</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p><strong>Cerrar actividad manualmente en Turitop.</strong></p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.tourCode }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Fecha</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.fecha }} {{ $node[\"Calcular Cupos\"].json.hora }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Personas</td><td style=\"padding:8px;border:1px solid #dee2e6\"><strong style=\"color:#e74c3c\">{{ $node[\"Calcular Cupos\"].json.updatedTotal }}/{{ $node[\"Calcular Cupos\"].json.cupoTotal }}</strong></td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Guía</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.guiaConfirmado || 'Sin asignar' }}</td></tr></table></div></div>",
+        "options": {}
+      },
+      "id": "aab8dbfd-0261-47b0-91b0-99ec6e4d8fbb",
+      "name": "Notificar Cierre Cupo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        1008
+      ],
+      "webhookId": "d8a0a985-12dd-418e-9484-9ed6ed4e3509"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-cupo-guia",
+              "leftValue": "={{ $node[\"Calcular Cupos\"].json.cupoGuiaSuperado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bb819307-b94d-4410-ac6e-3c3968c41624",
+      "name": "Cupo Guía Superado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2384,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=🟡 Necesario más guías — {{ $node[\"Calcular Cupos\"].json.tourCode }} {{ $node[\"Calcular Cupos\"].json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#f39c12;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">🟡 CUPO POR GUÍA SUPERADO</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p>Se necesitan <strong>{{ $node[\"Calcular Cupos\"].json.guiasNecesarios }} guías</strong> para {{ $node[\"Calcular Cupos\"].json.updatedTotal }} personas.</p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.tourCode }} — {{ $node[\"Calcular Cupos\"].json.fecha }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Personas</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.updatedTotal }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Máx por guía</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.cupoPorGuia }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Guía actual</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.guiaConfirmado || 'Sin asignar' }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Pendientes</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.guiasPendientes || 'Ninguno en lista' }}</td></tr></table><p style=\"margin-top:16px\">⚡ Contactar al siguiente guía de la lista de pendientes.</p></div></div>",
+        "options": {}
+      },
+      "id": "201d57b8-ffd0-4112-b191-e261c381745c",
+      "name": "Alertar Más Guías",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        1104
+      ],
+      "webhookId": "fc18212c-d809-4f3f-bea6-fb09af23c6d2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-pendientes",
+              "leftValue": "={{ $node[\"Calcular Cupos\"].json.hayPendientes }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c352e65-1b7a-404f-ac87-123ddabe5de1",
+      "name": "Guías Pendientes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2160,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=📋 Confirmar guía pendiente — {{ $node[\"Calcular Cupos\"].json.tourCode }} {{ $node[\"Calcular Cupos\"].json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#3498db;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">📋 GUÍA PENDIENTE DE CONFIRMACIÓN</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p>Hay guías en lista de espera para este evento. Contactar para confirmar disponibilidad.</p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.tourCode }} — {{ $node[\"Calcular Cupos\"].json.fecha }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Guía confirmado</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.guiaConfirmado || 'Ninguno aún' }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Pendientes</td><td style=\"padding:8px;border:1px solid #dee2e6;font-weight:bold;color:#e67e22\">{{ $node[\"Calcular Cupos\"].json.guiasPendientes }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Personas</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Calcular Cupos\"].json.updatedTotal }}</td></tr></table><p style=\"margin-top:16px\">💡 Enviar WhatsApp o email al siguiente guía de la lista para confirmar.</p></div></div>",
+        "options": {}
+      },
+      "id": "57e6de5e-2e85-4f72-aae3-435595ba961f",
+      "name": "Solicitar Confirmación Guía",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -1936,
+        1200
+      ],
+      "webhookId": "4f7baebc-4d11-40bd-bffd-d9c46e0f9ecf"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -1936,
+        1392
+      ],
+      "id": "d3c2a144-e5c5-4450-b1cc-6a9c006313df",
+      "name": "No Operation, do nothing"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Turitop": {
+      "main": [
+        [
+          {
+            "node": "Parsear Datos",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Calendar Mod": {
+      "main": [
+        [
+          {
+            "node": "Parsear Datos Mod",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Responder OK Mod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Datos Mod": {
+      "main": [
+        [
+          {
+            "node": "Buscar Evento en Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Datos": {
+      "main": [
+        [
+          {
+            "node": "Buscar Evento en Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Evento en Sheet": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Lookup": {
+      "main": [
+        [
+          {
+            "node": "Evento Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evento Existe?": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crear Evento Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Evento Calendar": {
+      "main": [
+        [
+          {
+            "node": "Registrar Mapa Evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Mapa Evento": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Datos": {
+      "main": [
+        [
+          {
+            "node": "Registrar Reserva",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar Reserva": {
+      "main": [
+        [
+          {
+            "node": "Calcular Cupos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Cupos": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Totales Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Totales Sheet": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Evento Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Evento Calendar": {
+      "main": [
+        [
+          {
+            "node": "Cupo Total Completo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cupo Total Completo?": {
+      "main": [
+        [
+          {
+            "node": "Notificar Cierre Cupo",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Cupo Guía Superado?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cupo Guía Superado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cupo Guía Superado?": {
+      "main": [
+        [
+          {
+            "node": "Alertar Más Guías",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Guías Pendientes?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guías Pendientes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guías Pendientes?": {
+      "main": [
+        [
+          {
+            "node": "Solicitar Confirmación Guía",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "33790e6e-2243-4b4b-9807-f6b6b3d687d9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "VSlx9QxSrOUdf9a6",
+  "tags": []
+}

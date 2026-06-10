@@ -1,0 +1,448 @@
+{
+  "name": "EXT2 — Respuesta Guía (Confirmar/Rechazar)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "respuesta-guia",
+        "options": {}
+      },
+      "id": "55aaa65f-7e87-48c4-ae60-0e5784f65354",
+      "name": "Webhook Respuesta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        160
+      ],
+      "webhookId": "respuesta-guia-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear parámetros de la URL de respuesta del guía\nconst query = $input.first().json.query || $input.first().json;\n\nconst action = query.action || ''; // 'confirm' o 'reject'\nconst confirmId = query.id || '';\n\nif (!confirmId || !action) {\n  throw new Error('Faltan parámetros: action e id son obligatorios');\n}\n\nreturn [{\n  json: {\n    action,\n    confirmId,\n    acepta: action === 'confirm',\n    timestamp: DateTime.now().setZone('Europe/Madrid').toISO()\n  }\n}];"
+      },
+      "id": "5d9a4e81-042c-4ace-9146-c96e35a14478",
+      "name": "Parsear Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "confirm_id",
+              "lookupValue": "={{ $json.confirmId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2c41d96-c1f0-4406-9b07-8fff47951249",
+      "name": "Buscar Confirmación",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -688,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combinar datos de la confirmación + respuesta\nconst confData = $input.first().json;\nconst respData = $node[\"Parsear Respuesta\"].json;\n\nreturn [{\n  json: {\n    ...respData,\n    confirmId: respData.confirmId,\n    tourCode: confData.tour_code || '',\n    fecha: confData.fecha || '',\n    productId: confData.product_id || '',\n    calendarEventId: confData.calendar_event_id || '',\n    guiaCodigo: confData.guia_codigo || '',\n    guiaNombre: confData.guia_nombre || '',\n    estado: confData.estado || '',\n    canal: confData.canal || ''\n  }\n}];"
+      },
+      "id": "4fb1a07b-584e-4ba3-8675-a0b6dca5448e",
+      "name": "Consolidar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-acepta",
+              "leftValue": "={{ $json.acepta }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b3a7aefd-6974-4592-85e3-0e66f4d1a54f",
+      "name": "Acepta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "confirm_id": "={{ $json.confirmId }}",
+            "estado": "confirmado",
+            "timestamp_respuesta": "={{ $json.timestamp }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "093c1cb6-687e-4647-8ec9-887e07a744c3",
+      "name": "Marcar Confirmado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Actualizar el evento: mover guía de pendientes a confirmado\n// Leer estado actual del evento y actualizar\nconst data = $node[\"Consolidar Datos\"].json;\n\n// Nuevo título con guía confirmado\n// NOTA: En producción, leer el evento actual de Sheet para obtener\n// la lista completa de pendientes y actualizar correctamente\nconst guiaConfirmado = data.guiaCodigo;\n\nreturn [{\n  json: {\n    ...data,\n    nuevoGuiaConfirmado: guiaConfirmado,\n    mensajeExito: `✅ ${data.guiaNombre} ha confirmado para ${data.tourCode} el ${data.fecha}`\n  }\n}];"
+      },
+      "id": "96a5608a-ce92-4b6e-bf8e-86a0306c8228",
+      "name": "Preparar Actualización",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Eventos"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product_short_id": "={{ $json.productId }}",
+            "fecha": "={{ $json.fecha }}",
+            "guia_confirmado": "={{ $json.nuevoGuiaConfirmado }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "4c7bbfda-476f-4659-bebc-be12c6a8b7be",
+      "name": "Actualizar Evento Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        464,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=✅ Guía confirmado — {{ $node[\"Consolidar Datos\"].json.tourCode }} {{ $node[\"Consolidar Datos\"].json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#27ae60;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">✅ Guía Confirmado</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p><strong>{{ $node[\"Consolidar Datos\"].json.guiaNombre }}</strong> ha confirmado su disponibilidad.</p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Consolidar Datos\"].json.tourCode }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Fecha</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Consolidar Datos\"].json.fecha }}</td></tr></table></div></div>",
+        "options": {}
+      },
+      "id": "c246eee0-006a-4068-8b42-896b987b8e1c",
+      "name": "Notificar Confirmación",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ],
+      "webhookId": "2ff360db-e897-465a-94ee-5bb7818b3780"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=✅ Gracias {{ $node[\"Consolidar Datos\"].json.guiaNombre }}! Tu confirmación ha sido registrada para {{ $node[\"Consolidar Datos\"].json.tourCode }} el {{ $node[\"Consolidar Datos\"].json.fecha }}.",
+        "options": {}
+      },
+      "id": "1ec2048a-1499-419a-b10b-6ffcfbc7e199",
+      "name": "Responder OK Confirmado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        928,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "confirm_id": "={{ $json.confirmId }}",
+            "estado": "rechazado",
+            "timestamp_respuesta": "={{ $json.timestamp }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "3e22e50d-beec-46ae-a94b-9f45a8912c1f",
+      "name": "Marcar Rechazado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// El guía rechazó: buscar siguiente guía pendiente\nconst data = $node[\"Consolidar Datos\"].json;\n\n// Leer guías pendientes del evento\n// NOTA: Esto requiere leer el Sheet de Eventos para obtener la lista actualizada\n// Por ahora, notificamos al equipo para gestión manual\n// En producción: leer Sheet → sacar siguiente de la lista → llamar al WF Contactar Guía\n\nreturn [{\n  json: {\n    ...data,\n    mensajeRechazo: `❌ ${data.guiaNombre} no está disponible para ${data.tourCode} el ${data.fecha}. Contactar al siguiente guía pendiente.`\n  }\n}];"
+      },
+      "id": "db645a14-6ea5-4e6d-adc5-772de140f99f",
+      "name": "Buscar Siguiente Guía",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=❌ Guía rechazó — {{ $node[\"Consolidar Datos\"].json.tourCode }} {{ $node[\"Consolidar Datos\"].json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#e74c3c;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">❌ Guía No Disponible</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p><strong>{{ $node[\"Consolidar Datos\"].json.guiaNombre }}</strong> ha rechazado la solicitud.</p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Consolidar Datos\"].json.tourCode }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Fecha</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $node[\"Consolidar Datos\"].json.fecha }}</td></tr></table><p style=\"margin-top:16px;color:#e74c3c;font-weight:bold\">⚡ Contactar al siguiente guía de la lista de pendientes.</p></div></div>",
+        "options": {}
+      },
+      "id": "d1a63627-0694-40ba-99af-a05dcc0e0196",
+      "name": "Escalar Rechazo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        464,
+        352
+      ],
+      "webhookId": "60aa59d3-376f-4d97-972d-85a239af5d95"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=Gracias {{ $node[\"Consolidar Datos\"].json.guiaNombre }}. Hemos registrado tu respuesta. El equipo contactará a otro guía.",
+        "options": {}
+      },
+      "id": "71a63116-bab0-46e3-bf90-dbf0dd2499b9",
+      "name": "Responder OK Rechazado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Buscar Confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Confirmación": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Datos": {
+      "main": [
+        [
+          {
+            "node": "Acepta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acepta?": {
+      "main": [
+        [
+          {
+            "node": "Marcar Confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar Rechazado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Confirmado": {
+      "main": [
+        [
+          {
+            "node": "Preparar Actualización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Actualización": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Evento Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Evento Sheet": {
+      "main": [
+        [
+          {
+            "node": "Notificar Confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Confirmación": {
+      "main": [
+        [
+          {
+            "node": "Responder OK Confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Rechazado": {
+      "main": [
+        [
+          {
+            "node": "Buscar Siguiente Guía",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Siguiente Guía": {
+      "main": [
+        [
+          {
+            "node": "Escalar Rechazo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalar Rechazo": {
+      "main": [
+        [
+          {
+            "node": "Responder OK Rechazado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "bbf5bf2e-3192-496d-8e83-404cb69df9ee",
+  "meta": {
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "cWCBLnjb0LfeHMck",
+  "tags": []
+}

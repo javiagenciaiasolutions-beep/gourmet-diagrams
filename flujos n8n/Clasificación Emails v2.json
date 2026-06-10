@@ -1,0 +1,717 @@
+{
+  "name": "Clasificación Emails v2 — Turitop + GYG + Civitatis + Viator",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "includeSpamTrash": false,
+          "readStatus": "unread"
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-turitop",
+              "leftValue": "={{ $json.from.value[0].address }}",
+              "rightValue": "turitop.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-turitop",
+      "name": "¿From Turitop?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [250, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-gyg",
+              "leftValue": "={{ $json.from.value[0].address }}",
+              "rightValue": "getyourguide.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-gyg",
+      "name": "¿From GetYourGuide?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-civitatis",
+              "leftValue": "={{ $json.from.value[0].address }}",
+              "rightValue": "civitatis.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-civitatis",
+      "name": "¿From Civitatis?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-viator",
+              "leftValue": "={{ $json.from.value[0].address }}",
+              "rightValue": "viator.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-viator",
+      "name": "¿From Viator?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1000, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const text = item.json.text || item.json.snippet || '';\n  const subject = item.json.subject || item.json.Subject || '';\n  const messageId = item.json.id;\n  \n  // === BOOKING ID ===\n  const bookingMatch = text.match(/G193-\\d{6}-\\d+/);\n  const bookingId = bookingMatch ? bookingMatch[0] : '';\n  \n  // === CUSTOMER NAME ===\n  let customerName = '';\n  const customerPatterns = [\n    /Customer:\\s*\\n\\s*([^\\n]+)/i,\n    /Nombre:\\s*([^\\n]+)/i,\n    /Customer name:\\s*([^\\n]+)/i\n  ];\n  for (const pat of customerPatterns) {\n    const m = text.match(pat);\n    if (m) { customerName = m[1].trim(); break; }\n  }\n  \n  // === TOUR NAME ===\n  let tourName = '';\n  const tourPatterns = [\n    /Service name:\\s*\\n?\\s*([^\\n]+)/i,\n    /Actividad:\\s*([^\\n]+)/i\n  ];\n  for (const pat of tourPatterns) {\n    const m = text.match(pat);\n    if (m) { tourName = m[1].trim(); break; }\n  }\n  \n  // === TOUR CODE ===\n  const TOUR_MAP = {\n    'wine and tapas': 'WT',\n    'wine tour': 'WT',\n    'tapas tour tarde': 'TT',\n    'tapas tour mañana': 'TM',\n    'tapas & wine': 'TT',\n    'curso de cata': 'CCATA',\n    'ribera del duero': 'WTR',\n    'wine and tapas walking': 'WT'\n  };\n  let tourCode = '';\n  const tourLower = tourName.toLowerCase();\n  for (const [key, code] of Object.entries(TOUR_MAP)) {\n    if (tourLower.includes(key)) { tourCode = code; break; }\n  }\n  \n  // === EVENT DATE ===\n  let eventDate = null;\n  const months = {\n    'january': '01', 'february': '02', 'march': '03', 'april': '04',\n    'may': '05', 'june': '06', 'july': '07', 'august': '08',\n    'september': '09', 'october': '10', 'november': '11', 'december': '12',\n    'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',\n    'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',\n    'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'\n  };\n  const monthPattern = Object.keys(months).join('|');\n  const datePatterns = [\n    new RegExp(`Event date:\\s*\\([^)]+\\)\\s*(\\d{1,2})\\s+(${monthPattern})\\s+(\\d{4})`, 'i'),\n    new RegExp(`Fecha del evento:\\s*\\([^)]+\\)\\s*(\\d{1,2})\\s+(${monthPattern})\\s+(\\d{4})`, 'i'),\n    new RegExp(`Fecha:\\s*(\\d{1,2})\\s+de\\s+(${monthPattern})\\s+de\\s+(\\d{4})`, 'i')\n  ];\n  for (const pat of datePatterns) {\n    const m = text.match(pat);\n    if (m) {\n      const monthNum = months[m[2].toLowerCase()];\n      if (monthNum) {\n        eventDate = `${m[3]}-${monthNum}-${m[1].padStart(2, '0')}`;\n        break;\n      }\n    }\n  }\n  \n  // === PEOPLE ===\n  let people = 0;\n  const peoplePatterns = [\n    /Adult\\s*\\(13\\+\\)\\s*(\\d+)\\s*x/i,\n    /(\\d+)\\s*adultos/i,\n    /(\\d+)\\s*adults/i,\n    /Personas:\\s*(\\d+)/i\n  ];\n  for (const pat of peoplePatterns) {\n    const m = text.match(pat);\n    if (m) { people = parseInt(m[1]); break; }\n  }\n  \n  // === CUSTOMER PHONE ===\n  let phone = '';\n  const phoneMatch = text.match(/☎\\s*(\\+[\\d\\s]+)/);\n  if (phoneMatch) phone = phoneMatch[1].trim();\n  \n  // === TOUR CODE FALLBACK ===\n  if (!tourCode) {\n    const subjectLower = subject.toLowerCase();\n    if (subjectLower.includes('wine') && subjectLower.includes('tapas')) tourCode = 'WT';\n    else if (subjectLower.includes('tapas')) tourCode = 'TT';\n    else if (subjectLower.includes('wine tour')) tourCode = 'WT';\n  }\n  \n  results.push({\n    json: {\n      messageId,\n      bookingId,\n      customerName,\n      tourName,\n      tourCode,\n      eventDate,\n      people,\n      phone,\n      source: 'turitop',\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "extract-turitop",
+      "name": "Extraer Datos Turitop",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, -150]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  if (!data.eventDate || !data.tourCode) {\n    results.push({\n      json: {\n        ...data,\n        dayNumber: 0,\n        labelName: 'Turitop/sin-clasificar',\n        year: new Date().getFullYear().toString(),\n        month: (new Date().getMonth() + 1).toString().padStart(2, '0')\n      }\n    });\n    continue;\n  }\n  \n  const dateParts = data.eventDate.split('-');\n  const year = dateParts[0];\n  const month = dateParts[1];\n  const day = parseInt(dateParts[2]);\n  const dayNumber = day;\n  const labelName = `Turitop/${year}/${month}/${dayNumber}-${data.tourCode}`;\n  \n  results.push({\n    json: {\n      ...data,\n      dayNumber,\n      labelName,\n      year,\n      month\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "calc-day-activity",
+      "name": "Calcular Día-Actividad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, -150]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "authentication": "oAuth2",
+        "options": {}
+      },
+      "id": "list-labels",
+      "name": "Listar Gmail Labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, -150]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst labelsResponse = items[0].json;\nconst calcData = $node['Calcular Día-Actividad'].json;\n\nconst targetLabel = calcData.labelName;\nconst messageId = calcData.messageId;\nconst labels = labelsResponse.labels || [];\n\nconst found = labels.find(l => l.name === targetLabel);\n\nreturn [{\n  json: {\n    labelId: found ? found.id : null,\n    labelExists: found ? true : false,\n    labelName: targetLabel,\n    messageId: messageId\n  }\n}];"
+      },
+      "id": "check-label",
+      "name": "¿Label Existe?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, -150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "authentication": "oAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": \"{{ $node['Calcular Día-Actividad'].json.labelName }}\",\n  \"labelListVisibility\": \"labelShow\",\n  \"messageListVisibility\": \"show\"\n}",
+        "options": {}
+      },
+      "id": "create-label",
+      "name": "Crear Gmail Label",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1500, -250]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $node['Calcular Día-Actividad'].json.messageId }}/modify",
+        "authentication": "oAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"addLabelIds\": [\"{{ $json.labelId || $json.id }}\"]\n}",
+        "options": {}
+      },
+      "id": "apply-label",
+      "name": "Aplicar Label",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1750, -150]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reservas",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $node['Extraer Datos Turitop'].json.bookingId }}",
+            "customer_name": "={{ $node['Extraer Datos Turitop'].json.customerName }}",
+            "tour_code": "={{ $node['Extraer Datos Turitop'].json.tourCode }}",
+            "tour_name": "={{ $node['Extraer Datos Turitop'].json.tourName }}",
+            "event_date": "={{ $node['Extraer Datos Turitop'].json.eventDate }}",
+            "people": "={{ $node['Extraer Datos Turitop'].json.people }}",
+            "status": "active",
+            "version": "1",
+            "source": "turitop",
+            "timestamp": "={{ $node['Extraer Datos Turitop'].json.timestamp }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-reserva",
+      "name": "Guardar Reserva",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2000, -150]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reservas",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "customer_name",
+              "lookupValue": "={{ $node['Extraer Datos Turitop'].json.customerName }}"
+            },
+            {
+              "lookupColumn": "status",
+              "lookupValue": "superseded"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "lookup-superseded",
+      "name": "¿Hay Superseded?",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2250, -150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-found-superseded",
+              "leftValue": "={{ $json.booking_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-superseded-found",
+      "name": "¿Encontrado Superseded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2500, -150]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "REPLACE_CON_TU_N8N_URL/webhook/calendar-mod",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"booking_id\": \"{{ $node['Extraer Datos Turitop'].json.bookingId }}\",\n  \"tour_code\": \"{{ $node['Extraer Datos Turitop'].json.tourCode }}\",\n  \"event_date\": \"{{ $node['Extraer Datos Turitop'].json.eventDate }}\",\n  \"people\": {{ $node['Extraer Datos Turitop'].json.people }},\n  \"customer_name\": \"{{ $node['Extraer Datos Turitop'].json.customerName }}\",\n  \"event_type\": \"modify\"\n}",
+        "options": {}
+      },
+      "id": "update-calendar",
+      "name": "Actualizar Calendar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2750, -250]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agentResponse = $input.first().json;\nconst prevData = $node['Gmail Trigger'].json;\n\nlet aiAnswer = '';\nlet confidence = 0;\n\ntry {\n  const outputText = agentResponse.output || agentResponse.text || '';\n  const jsonMatch = outputText.match(/\\{[\\s\\S]*?\\}/);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    aiAnswer = parsed;\n    confidence = 100;\n  }\n} catch(e) {\n  aiAnswer = { error: e.message };\n  confidence = 0;\n}\n\nreturn [{\n  json: {\n    ...aiAnswer,\n    confidence,\n    messageId: prevData.id,\n    subject: prevData.subject || prevData.Subject,\n    from: prevData.from?.text || prevData.From\n  }\n}];"
+      },
+      "id": "parse-llm-response",
+      "name": "Parsear Respuesta LLM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 250]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.text || $json.snippet }}",
+        "options": {}
+      },
+      "id": "llm-process",
+      "name": "LLM Procesar Email",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [1000, 250],
+      "credentials": {
+        "googleGeminiApi": {
+          "id": "REPLACE_CON_TU_CREDENTIAL_ID",
+          "name": "Google Gemini API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "clasificación_emails",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "message_id": "={{ $json.messageId }}",
+            "source": "={{ $json.from?.includes('getyourguide') ? 'gyg' : $json.from?.includes('civitatis') ? 'civitatis' : 'viator' }}",
+            "subject": "={{ $json.subject }}",
+            "from": "={{ $json.from }}",
+            "reference_code": "={{ $json.reference_code }}",
+            "customer_name": "={{ $json.customer_name }}",
+            "tour_code": "={{ $json.tour_code }}",
+            "event_date": "={{ $json.event_date_original || $json.event_date_new }}",
+            "people": "={{ $json.people }}",
+            "modification_type": "={{ $json.modification_type }}",
+            "old_date": "={{ $json.event_date_original }}",
+            "new_date": "={{ $json.event_date_new }}",
+            "status": "classified",
+            "timestamp": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "save-classification",
+      "name": "Guardar Clasificación",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1500, 250]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reservas",
+          "mode": "list"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "customer_name",
+              "lookupValue": "={{ $json.customer_name }}"
+            },
+            {
+              "lookupColumn": "status",
+              "lookupValue": "active"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "lookup-reserva-activa",
+      "name": "Lookup Reserva Activa",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1750, 250]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-reserva-found",
+              "leftValue": "={{ $json.booking_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-reserva-found",
+      "name": "¿Reserva Encontrada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2000, 250]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-is-cancel",
+              "leftValue": "={{ $json.modification_type }}",
+              "rightValue": "cancel",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-cancel",
+      "name": "¿Es Cancelación?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2250, 250]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reservas",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $json.booking_id }}",
+            "status": "cancelled"
+          }
+        },
+        "options": {}
+      },
+      "id": "mark-cancelled",
+      "name": "Marcar Cancelada",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2500, 150]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_CON_TU_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "reservas",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $json.booking_id }}",
+            "status": "superseded",
+            "gyg_reference": "={{ $json.reference_code }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "mark-superseded",
+      "name": "Marcar Superseded",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2500, 350]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=🔴 [CANCELACIÓN] Reserva {{ $json.booking_id }} cancelada via {{ $json.source }}",
+        "message": "=<p>La reserva de <strong>{{ $json.customer_name }}</strong> para <strong>{{ $json.tour_name }}</strong> el <strong>{{ $json.event_date }}</strong> ha sido cancelada via {{ $json.source }}.</p><p>Código referencia: {{ $json.reference_code }}</p><p>Se ha eliminado el evento de Google Calendar.</p>",
+        "options": {}
+      },
+      "id": "notify-cancel",
+      "name": "Notificar Cancelación",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [2750, 150]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=🟡 [MODIFICACIÓN] Reserva {{ $json.booking_id }} — detected change via {{ $json.source }}",
+        "message": "=<p>Se ha detectado una modificación de <strong>{{ $json.source }}</strong> para la reserva de <strong>{{ $json.customer_name }}</strong>.</p><p>Código referencia: {{ $json.reference_code }}</p><p>Tipo: modificación de fecha</p><p>Fecha original: {{ $json.old_date }} → Nueva fecha: {{ $json.new_date }}</p><p>Se espera el 2º email de Turitop con la actualización.</p><p>Se actualizará Google Calendar automáticamente cuando llegue.</p>",
+        "options": {}
+      },
+      "id": "notify-modify",
+      "name": "Notificar Modificación",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [2750, 350]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=⚠️ [SIN REFERENCIA] Modificación de {{ $json.source }} sin reserva vinculada",
+        "message": "=<p>No se ha encontrado una reserva activa vinculada a esta modificación.</p><p>Referencia: {{ $json.reference_code }}</p><p>Cliente: {{ $json.customer_name }}</p><p>Tour: {{ $json.tour_name }}</p><p><strong>Acción requerida:</strong> Revisar manualmente y vincular la reserva.</p>",
+        "options": {}
+      },
+      "id": "notify-no-reference",
+      "name": "Notificar Sin Reference",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [2250, 450]
+    },
+    {
+      "parameters": {},
+      "id": "noop-end",
+      "name": "No Operation",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1250, 450]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [{ "node": "¿From Turitop?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿From Turitop?": {
+      "main": [
+        [{ "node": "Extraer Datos Turitop", "type": "main", "index": 0 }],
+        [{ "node": "¿From GetYourGuide?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿From GetYourGuide?": {
+      "main": [
+        [{ "node": "LLM Procesar Email", "type": "main", "index": 0 }],
+        [{ "node": "¿From Civitatis?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿From Civitatis?": {
+      "main": [
+        [{ "node": "LLM Procesar Email", "type": "main", "index": 0 }],
+        [{ "node": "¿From Viator?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿From Viator?": {
+      "main": [
+        [{ "node": "LLM Procesar Email", "type": "main", "index": 0 }],
+        [{ "node": "No Operation", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extraer Datos Turitop": {
+      "main": [
+        [{ "node": "Calcular Día-Actividad", "type": "main", "index": 0 }]
+      ]
+    },
+    "Calcular Día-Actividad": {
+      "main": [
+        [{ "node": "Listar Gmail Labels", "type": "main", "index": 0 }]
+      ]
+    },
+    "Listar Gmail Labels": {
+      "main": [
+        [{ "node": "¿Label Existe?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Label Existe?": {
+      "main": [
+        [{ "node": "Aplicar Label", "type": "main", "index": 0 }],
+        [{ "node": "Crear Gmail Label", "type": "main", "index": 0 }]
+      ]
+    },
+    "Crear Gmail Label": {
+      "main": [
+        [{ "node": "Aplicar Label", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aplicar Label": {
+      "main": [
+        [{ "node": "Guardar Reserva", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardar Reserva": {
+      "main": [
+        [{ "node": "¿Hay Superseded?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Hay Superseded?": {
+      "main": [
+        [{ "node": "¿Encontrado Superseded?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Encontrado Superseded?": {
+      "main": [
+        [{ "node": "Actualizar Calendar", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "LLM Procesar Email": {
+      "main": [
+        [{ "node": "Parsear Respuesta LLM", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parsear Respuesta LLM": {
+      "main": [
+        [{ "node": "Guardar Clasificación", "type": "main", "index": 0 }]
+      ]
+    },
+    "Guardar Clasificación": {
+      "main": [
+        [{ "node": "Lookup Reserva Activa", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lookup Reserva Activa": {
+      "main": [
+        [{ "node": "¿Reserva Encontrada?", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Reserva Encontrada?": {
+      "main": [
+        [{ "node": "¿Es Cancelación?", "type": "main", "index": 0 }],
+        [{ "node": "Notificar Sin Reference", "type": "main", "index": 0 }]
+      ]
+    },
+    "¿Es Cancelación?": {
+      "main": [
+        [{ "node": "Marcar Cancelada", "type": "main", "index": 0 }],
+        [{ "node": "Marcar Superseded", "type": "main", "index": 0 }]
+      ]
+    },
+    "Marcar Cancelada": {
+      "main": [
+        [{ "node": "Notificar Cancelación", "type": "main", "index": 0 }]
+      ]
+    },
+    "Marcar Superseded": {
+      "main": [
+        [{ "node": "Notificar Modificación", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1
+}

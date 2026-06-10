@@ -1,0 +1,286 @@
+{
+  "name": "EXT1 — Contactar Guía (WhatsApp + Email)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contactar-guia",
+        "options": {}
+      },
+      "id": "3751294a-13ba-4c4f-abef-26f6d5f684ec",
+      "name": "Webhook Contactar Guía",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        128
+      ],
+      "webhookId": "contactar-guia-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibir datos del workflow principal o de reintento\nconst body = $input.first().json.body || $input.first().json;\n\nconst guiaCodigo = body.guia_codigo || '';\nconst tourCode = body.tour_code || '';\nconst fecha = body.fecha || '';\nconst hora = body.hora || '';\nconst personas = body.personas || 0;\nconst productId = body.product_id || '';\nconst calendarEventId = body.calendar_event_id || '';\nconst timeoutHoras = body.timeout_horas || 24;\n\n// Generar ID único para esta confirmación\nconst confirmId = `CONF-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;\n\n// URL base del webhook de respuesta (AJUSTAR con tu dominio n8n)\nconst baseUrl = 'REPLACE_CON_TU_N8N_URL/webhook/respuesta-guia';\nconst urlConfirmar = `${baseUrl}?action=confirm&id=${confirmId}`;\nconst urlRechazar = `${baseUrl}?action=reject&id=${confirmId}`;\n\nreturn [{\n  json: {\n    confirmId,\n    guiaCodigo,\n    tourCode,\n    fecha,\n    hora,\n    personas,\n    productId,\n    calendarEventId,\n    timeoutHoras,\n    urlConfirmar,\n    urlRechazar,\n    timestamp: DateTime.now().setZone('Europe/Madrid').toISO()\n  }\n}];"
+      },
+      "id": "dbdda8ba-64ec-45df-b9de-b7b18cf05b07",
+      "name": "Preparar Solicitud",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Guías"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "codigo",
+              "lookupValue": "={{ $json.guiaCodigo }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "03752ac9-9523-45e3-8e34-9f61cb56ca4e",
+      "name": "Buscar Datos Guía",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -688,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combinar datos de la solicitud + datos del guía\nconst guiaData = $input.first().json;\nconst solicitud = $node[\"Preparar Solicitud\"].json;\n\nconst nombre = guiaData.nombre || solicitud.guiaCodigo;\nconst email = guiaData.email || '';\nconst telefono = guiaData.telefono_whatsapp || '';\nconst tieneWhatsApp = telefono && telefono.length > 5;\n\n// Mensaje para el guía\nconst mensajeTexto = `Hola ${nombre} 👋\n\nTe necesitamos para un tour:\n🎯 ${solicitud.tourCode} — ${solicitud.fecha} a las ${solicitud.hora}\n👥 ${solicitud.personas} personas\n\n¿Estás disponible?\n\n✅ CONFIRMAR:\\n${solicitud.urlConfirmar}\n\n❌ NO DISPONIBLE:\\n${solicitud.urlRechazar}\n\n⏰ Tienes ${solicitud.timeoutHoras}h para responder.\n\n— Gourmet Madrid`;\n\nconst mensajeHtml = `<div style=\"font-family:Arial,sans-serif;max-width:500px\">\n<h3>Hola ${nombre} 👋</h3>\n<p>Te necesitamos para un tour:</p>\n<table style=\"border-collapse:collapse;width:100%;margin:12px 0\">\n<tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">${solicitud.tourCode}</td></tr>\n<tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Fecha</td><td style=\"padding:8px;border:1px solid #dee2e6\">${solicitud.fecha} a las ${solicitud.hora}</td></tr>\n<tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Personas</td><td style=\"padding:8px;border:1px solid #dee2e6\">${solicitud.personas}</td></tr>\n</table>\n<p>¿Estás disponible?</p>\n<div style=\"margin:20px 0\">\n<a href=\"${solicitud.urlConfirmar}\" style=\"display:inline-block;background:#27ae60;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;margin-right:12px;font-weight:bold\">✅ CONFIRMAR</a>\n<a href=\"${solicitud.urlRechazar}\" style=\"display:inline-block;background:#e74c3c;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold\">❌ NO DISPONIBLE</a>\n</div>\n<p style=\"color:#888;font-size:12px\">⏰ Tienes ${solicitud.timeoutHoras}h para responder.</p>\n</div>`;\n\nreturn [{\n  json: {\n    ...solicitud,\n    nombre,\n    email,\n    telefono,\n    tieneWhatsApp,\n    mensajeTexto,\n    mensajeHtml\n  }\n}];"
+      },
+      "id": "64762581-07f5-4f97-83b1-4acdd193895e",
+      "name": "Construir Mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-tiene-whatsapp",
+              "leftValue": "={{ $json.tieneWhatsApp }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "231ca2f4-d2d3-4e4a-a225-acbe66c9fcc1",
+      "name": "Tiene WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=REPLACE_EVOLUTION_API_URL/message/sendText/REPLACE_INSTANCE_NAME",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.telefono, text: $json.mensajeTexto }) }}",
+        "options": {}
+      },
+      "id": "ca71026b-692e-47e4-a619-c691c76b3af8",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=📋 ¿Disponible para {{ $json.tourCode }} el {{ $json.fecha }}?",
+        "message": "={{ $json.mensajeHtml }}",
+        "options": {}
+      },
+      "id": "41ec236d-b39e-4fe9-99e6-fd145e86b732",
+      "name": "Enviar Email Guía",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        0,
+        272
+      ],
+      "webhookId": "5141ec44-7608-4090-868a-6a4c14e8a8ef"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "confirm_id": "={{ $node[\"Construir Mensaje\"].json.confirmId }}",
+            "tour_code": "={{ $node[\"Construir Mensaje\"].json.tourCode }}",
+            "fecha": "={{ $node[\"Construir Mensaje\"].json.fecha }}",
+            "product_id": "={{ $node[\"Construir Mensaje\"].json.productId }}",
+            "calendar_event_id": "={{ $node[\"Construir Mensaje\"].json.calendarEventId }}",
+            "guia_codigo": "={{ $node[\"Construir Mensaje\"].json.guiaCodigo }}",
+            "guia_nombre": "={{ $node[\"Construir Mensaje\"].json.nombre }}",
+            "canal": "={{ $node[\"Construir Mensaje\"].json.tieneWhatsApp ? 'whatsapp' : 'email' }}",
+            "timestamp_envio": "={{ $node[\"Construir Mensaje\"].json.timestamp }}",
+            "timeout_horas": "={{ $node[\"Construir Mensaje\"].json.timeoutHoras }}",
+            "estado": "pendiente",
+            "timestamp_respuesta": ""
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "855e1f8e-c615-45b4-b159-91fde5f4f9e1",
+      "name": "Registrar Confirmación",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Contactar Guía": {
+      "main": [
+        [
+          {
+            "node": "Preparar Solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Solicitud": {
+      "main": [
+        [
+          {
+            "node": "Buscar Datos Guía",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Datos Guía": {
+      "main": [
+        [
+          {
+            "node": "Construir Mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir Mensaje": {
+      "main": [
+        [
+          {
+            "node": "Tiene WhatsApp?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tiene WhatsApp?": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar Email Guía",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Registrar Confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email Guía": {
+      "main": [
+        [
+          {
+            "node": "Registrar Confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5e7eb05c-af8b-4f71-81b5-99f3d03c3310",
+  "meta": {
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "BM3Jp6jXfojqRvlV",
+  "tags": []
+}

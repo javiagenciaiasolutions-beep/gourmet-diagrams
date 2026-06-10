@@ -1,0 +1,253 @@
+{
+  "name": "EXT3 — Cron Timeout Confirmaciones Guías",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "70031bc9-0f2c-48d2-9605-61240690969c",
+      "name": "Cada 1 Hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "estado",
+              "lookupValue": "pendiente"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8e083d81-6893-4173-b8ce-75cd50257f25",
+      "name": "Leer Pendientes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filtrar confirmaciones expiradas\nconst items = $input.all();\nconst now = DateTime.now().setZone('Europe/Madrid');\nconst expiradas = [];\n\nfor (const item of items) {\n  const data = item.json;\n  if (!data.timestamp_envio || !data.timeout_horas) continue;\n\n  const envio = DateTime.fromISO(data.timestamp_envio, { zone: 'Europe/Madrid' });\n  const timeout = parseInt(data.timeout_horas || 24);\n  const limite = envio.plus({ hours: timeout });\n\n  if (now > limite) {\n    const horasTranscurridas = Math.round(now.diff(envio, 'hours').hours);\n    expiradas.push({\n      json: {\n        ...data,\n        horasTranscurridas,\n        limiteISO: limite.toISO(),\n        expirado: true\n      }\n    });\n  }\n}\n\n// Si no hay expiradas, devolver array vacío (el IF siguiente lo detectará)\nif (expiradas.length === 0) {\n  return [{ json: { hayExpiradas: false, count: 0 } }];\n}\n\n// Devolver las expiradas\nreturn expiradas.map(e => ({\n  json: { ...e.json, hayExpiradas: true, count: expiradas.length }\n}));"
+      },
+      "id": "c71a10e9-bec2-402a-8e3a-314d21fd9320",
+      "name": "Filtrar Expiradas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-hay-expiradas",
+              "leftValue": "={{ $json.hayExpiradas }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "861b6a8a-e610-493f-8b64-f4640ad527d3",
+      "name": "Hay Expiradas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        704,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e52fd9a8-4385-40da-bbf7-8d394a2a3a20",
+      "name": "Procesar Una a Una",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        928,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Confirmaciones"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "confirm_id": "={{ $json.confirm_id }}",
+            "estado": "timeout",
+            "timestamp_respuesta": "={{ DateTime.now().setZone('Europe/Madrid').toISO() }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "9bfcd216-988e-4eed-9571-d7d72cae3cb7",
+      "name": "Marcar Timeout",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1152,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=⏰ Timeout guía — {{ $json.tour_code }} {{ $json.fecha }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif\"><div style=\"background:#9b59b6;color:white;padding:16px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">⏰ TIMEOUT — Guía no respondió</h2></div><div style=\"border:1px solid #ddd;padding:20px;border-radius:0 0 8px 8px\"><p><strong>{{ $json.guia_nombre }}</strong> no respondió en {{ $json.timeout_horas }}h (transcurridas: {{ $json.horasTranscurridas }}h).</p><table style=\"border-collapse:collapse;width:100%\"><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Tour</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $json.tour_code }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Fecha</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $json.fecha }}</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Guía</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $json.guia_nombre }} ({{ $json.guia_codigo }})</td></tr><tr><td style=\"padding:8px;background:#f8f9fa;border:1px solid #dee2e6;font-weight:bold\">Canal</td><td style=\"padding:8px;border:1px solid #dee2e6\">{{ $json.canal }}</td></tr></table><p style=\"margin-top:16px;font-weight:bold;color:#9b59b6\">⚡ Acción requerida: contactar al siguiente guía pendiente o asignar manualmente.</p></div></div>",
+        "options": {}
+      },
+      "id": "637edbec-8273-4113-bc80-b964deb5242d",
+      "name": "Notificar Timeout",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        0
+      ],
+      "webhookId": "bdb13054-4fcf-430e-95d9-e579aa5d6661"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cada 1 Hora": {
+      "main": [
+        [
+          {
+            "node": "Leer Pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Pendientes": {
+      "main": [
+        [
+          {
+            "node": "Filtrar Expiradas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar Expiradas": {
+      "main": [
+        [
+          {
+            "node": "Hay Expiradas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay Expiradas?": {
+      "main": [
+        [
+          {
+            "node": "Procesar Una a Una",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Una a Una": {
+      "main": [
+        [
+          {
+            "node": "Marcar Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Timeout": {
+      "main": [
+        [
+          {
+            "node": "Notificar Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Timeout": {
+      "main": [
+        [
+          {
+            "node": "Procesar Una a Una",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8130991a-f382-4863-a174-ede060656e2d",
+  "meta": {
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "WEolBpErGhBvKSQw",
+  "tags": []
+}

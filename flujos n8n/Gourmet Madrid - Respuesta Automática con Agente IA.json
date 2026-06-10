@@ -1,0 +1,412 @@
+{
+  "name": "Gourmet Madrid - Respuesta Automática con Agente IA",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "includeSpamTrash": false,
+          "readStatus": "unread"
+        }
+      },
+      "id": "7c09305c-f64c-4a47-968c-322ec82f52eb",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1584,
+        128
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-no-noreply",
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "noreply",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "cond-no-newsletter",
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "newsletter",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "cond-no-mailer",
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "mailer-daemon",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "cond-no-noreply2",
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "no-reply",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fedd50cb-2e91-4a01-94e0-6c834916b51c",
+      "name": "Es Email Válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "markAsRead",
+        "messageId": "={{ $json.id }}"
+      },
+      "id": "f1ed57b9-4a65-4f57-93ec-10e95ffea49b",
+      "name": "Marcar Leído",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        224
+      ],
+      "webhookId": "a0506dc2-7804-461b-bbb2-2a3d4d9a5bc9",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar datos para el Agente IA\nconst kbData = $input.first().json;\nconst emailData = $node[\"Gmail Trigger\"].json;\n\n// Extraer texto del KB\nlet kbText = '';\nif (typeof kbData === 'string') {\n  kbText = kbData;\n} else if (kbData.data) {\n  kbText = typeof kbData.data === 'string' ? kbData.data : JSON.stringify(kbData.data);\n} else if (kbData.body) {\n  kbText = typeof kbData.body === 'string' ? kbData.body : JSON.stringify(kbData.body);\n} else {\n  kbText = JSON.stringify(kbData);\n}\n\n// System prompt para el agente\nconst systemPrompt = `Eres el asistente de atención al cliente de Gourmet Madrid, un restaurante de alta cocina española en el centro de Madrid.\n\nPERSONALIDAD:\n- Profesional pero cercano y cálido\n- Siempre en español\n- Representas al restaurante con orgullo\n\nKNOWLEDGE BASE DEL RESTAURANTE:\n---\n${kbText}\n---\n\nREGLAS ESTRICTAS:\n1. Responde ÚNICAMENTE con información que esté en el Knowledge Base.\n2. Si la pregunta NO se puede responder con el KB, sé honesto: indica que vas a trasladar la consulta al equipo.\n3. SIEMPRE responde en formato JSON válido con esta estructura:\n{\"answer\": \"tu respuesta completa aquí\", \"confidence\": 85}\n- answer: respuesta profesional y completa para el cliente\n- confidence: número 0-100\n  - 80-100: La información está claramente en el KB\n  - 50-79: Información parcial, respuesta inferida\n  - 0-49: No hay información suficiente en el KB\n4. NO inventes información que no esté en el KB.\n5. Incluye detalles específicos del KB cuando sea posible (horarios, precios, etc.).`;\n\n// Mensaje del usuario (el email recibido)\nconst userMessage = `Analiza este email de un cliente y genera una respuesta:\n\nDe: ${emailData.from}\nAsunto: ${emailData.subject}\nFecha: ${emailData.date}\n\nContenido:\n${emailData.text || emailData.snippet || '(sin contenido)'}`;\n\nreturn [{\n  json: {\n    systemPrompt,\n    userMessage,\n    messageId: emailData.id,\n    threadId: emailData.threadId,\n    originalFrom: emailData.from,\n    originalSubject: emailData.subject,\n    originalDate: emailData.date,\n    originalBody: emailData.text || emailData.snippet || ''\n  }\n}];"
+      },
+      "id": "fa8d8656-fcb6-4106-bf7d-25e36a7fcefd",
+      "name": "Preparar Consulta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.userMessage }}",
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}",
+          "maxIterations": 3
+        }
+      },
+      "id": "ef5b6c2d-c198-41a3-9040-5b3d78ede6d4",
+      "name": "Agente IA",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -640,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluar la respuesta del Agente IA\nconst agentResponse = $input.first().json;\nconst prevData = $node[\"Preparar Consulta\"].json;\n\nlet aiAnswer = '';\nlet confidence = 0;\n\ntry {\n  // El agente devuelve su respuesta en .output\n  const outputText = agentResponse.output || agentResponse.text || '';\n\n  // Intentar extraer JSON de la respuesta\n  const jsonMatch = outputText.match(/\\{[\\s\\S]*?\"answer\"[\\s\\S]*?\"confidence\"[\\s\\S]*?\\}/);\n\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    aiAnswer = parsed.answer || '';\n    confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;\n  } else {\n    // Si no hay JSON, usar respuesta completa como answer con baja confianza\n    aiAnswer = outputText;\n    confidence = 30;\n  }\n} catch (e) {\n  // Fallback: usar texto raw del agente\n  const rawOutput = agentResponse.output || agentResponse.text || 'Error procesando la respuesta';\n  // Limpiar posibles marcadores JSON rotos\n  aiAnswer = rawOutput.replace(/[{}\"]/g, '').trim();\n  confidence = 0;\n}\n\n// Construir HTML de respuesta con firma corporativa\nconst replyHtml = `<div style=\"font-family: Georgia, serif; color: #2c2c2c; line-height: 1.6;\">\n<p>${aiAnswer.replace(/\\n/g, '<br>')}</p>\n<br>\n<hr style=\"border: none; border-top: 1px solid #c9a96e; margin: 20px 0;\">\n<p style=\"color: #8b7355; font-size: 13px;\">\n<strong>Gourmet Madrid</strong><br>\nAtención al Cliente<br>\n<a href=\"mailto:info@gourmetmadrid.com\" style=\"color: #c9a96e;\">info@gourmetmadrid.com</a>\n</p>\n</div>`;\n\nreturn [{\n  json: {\n    answer: aiAnswer,\n    confidence: confidence,\n    replyHtml: replyHtml,\n    messageId: prevData.messageId,\n    threadId: prevData.threadId,\n    originalFrom: prevData.originalFrom,\n    originalSubject: prevData.originalSubject,\n    originalDate: prevData.originalDate,\n    originalBody: prevData.originalBody\n  }\n}];"
+      },
+      "id": "fc250800-659a-46d5-b242-1c57f6cb052f",
+      "name": "Evaluar Respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-confidence-80",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "724bbdde-3f9c-4bcc-92e7-e1de4c117b0f",
+      "name": "Confianza Suficiente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $json.messageId }}",
+        "message": "={{ $json.replyHtml }}",
+        "options": {}
+      },
+      "id": "8b7d90a0-09db-41d3-8273-0871cf2e762f",
+      "name": "Responder Cliente",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -64
+      ],
+      "webhookId": "b75a59c4-2df1-47e4-a7ac-7d69831a3c33",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "equipo@gourmetmadrid.com",
+        "subject": "=⚠️ Respuesta manual necesaria — {{ $json.originalSubject }}",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px;\">\n<div style=\"background: #e74c3c; color: white; padding: 16px 20px; border-radius: 8px 8px 0 0;\">\n<h2 style=\"margin: 0;\">⚠️ Se requiere respuesta manual</h2>\n</div>\n<div style=\"border: 1px solid #dee2e6; border-top: none; padding: 20px; border-radius: 0 0 8px 8px;\">\n<table style=\"border-collapse: collapse; width: 100%; margin-bottom: 20px;\">\n<tr><td style=\"padding: 10px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6; width: 140px;\">De:</td><td style=\"padding: 10px 12px; border: 1px solid #dee2e6;\">{{ $json.originalFrom }}</td></tr>\n<tr><td style=\"padding: 10px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;\">Asunto:</td><td style=\"padding: 10px 12px; border: 1px solid #dee2e6;\">{{ $json.originalSubject }}</td></tr>\n<tr><td style=\"padding: 10px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;\">Fecha:</td><td style=\"padding: 10px 12px; border: 1px solid #dee2e6;\">{{ $json.originalDate }}</td></tr>\n<tr><td style=\"padding: 10px 12px; font-weight: bold; background: #f8f9fa; border: 1px solid #dee2e6;\">Confianza IA:</td><td style=\"padding: 10px 12px; border: 1px solid #dee2e6;\"><span style=\"background: #e74c3c; color: white; padding: 3px 10px; border-radius: 12px; font-weight: bold;\">{{ $json.confidence }}%</span></td></tr>\n</table>\n<h3 style=\"color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 8px;\">📩 Email original del cliente:</h3>\n<div style=\"background: #f8f9fa; padding: 16px; border-left: 4px solid #3498db; margin: 12px 0; white-space: pre-wrap;\">{{ $json.originalBody }}</div>\n<h3 style=\"color: #2c3e50; border-bottom: 2px solid #f39c12; padding-bottom: 8px;\">🤖 Borrador sugerido por IA:</h3>\n<div style=\"background: #fff3cd; padding: 16px; border-left: 4px solid #f39c12; margin: 12px 0;\">{{ $json.answer }}</div>\n<p style=\"color: #999; font-size: 11px; margin-top: 20px;\">Workflow automático · Gourmet Madrid · Agente IA</p>\n</div>\n</div>",
+        "options": {}
+      },
+      "id": "9370037f-fd8f-4725-9e4d-3b08df260556",
+      "name": "Notificar Equipo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        160,
+        128
+      ],
+      "webhookId": "10a97246-5280-48db-9787-4999dac341a9",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        384,
+        -64
+      ],
+      "id": "52506b8c-1088-43f3-87dc-ce683be63811",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        384,
+        128
+      ],
+      "id": "8e7b3e89-e864-4267-8c78-9df4bc16dbe5",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -864,
+        224
+      ],
+      "id": "66bf4068-a4bb-4262-bf52-e065d2d5d51c",
+      "name": "No Operation, do nothing2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        304
+      ],
+      "id": "560de8ad-b69b-4543-83e9-16a26d3bd400",
+      "name": "Google Gemini Chat Model",
+      "disabled": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Es Email Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Email Válido?": {
+      "main": [
+        [
+          {
+            "node": "Preparar Consulta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar Leído",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Consulta": {
+      "main": [
+        []
+      ]
+    },
+    "Agente IA": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Respuesta": {
+      "main": [
+        []
+      ]
+    },
+    "Confianza Suficiente?": {
+      "main": [
+        [
+          {
+            "node": "Responder Cliente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notificar Equipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder Cliente": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notificar Equipo": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Leído": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente IA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7f1f1bcc-cc23-4ac5-9c42-81fbb050f9fc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "iOgxhiDbuPiIiWi0",
+  "tags": []
+}

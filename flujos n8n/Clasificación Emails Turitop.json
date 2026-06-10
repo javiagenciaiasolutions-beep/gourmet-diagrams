@@ -1,0 +1,404 @@
+{
+  "name": "Clasificación Emails Turitop",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "includeSpamTrash": false,
+          "readStatus": "both"
+        },
+        "options": {}
+      },
+      "id": "92167321-93b3-4fa9-9d8e-f4d9e8bc1bcd",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -992,
+        0
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-turitop",
+              "leftValue": "={{ $json.from.value[0].address }}",
+              "rightValue": "turitop.com",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8e1364b6-4b17-4c4f-bb6b-b95a51b3ed30",
+      "name": "Es Turitop?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst months = {\n  'january': '01', 'february': '02', 'march': '03', 'april': '04',\n  'may': '05', 'june': '06', 'july': '07', 'august': '08',\n  'september': '09', 'october': '10', 'november': '11', 'december': '12',\n  'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',\n  'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',\n  'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'\n};\n\nconst monthPattern = Object.keys(months).join('|');\n\nfunction extractDate(text) {\n  // 1) Modificación: fecha ISO después de la flecha ➡ (fecha NUEVA)\n  const modMatch = text.match(/➡\\s*(\\d{4})-(\\d{2})-(\\d{2})/);\n  if (modMatch) {\n    return { year: modMatch[1], month: modMatch[2], day: modMatch[3] };\n  }\n\n  // 2) \"Event date: (Day) DD Month YYYY\" o \"Fecha del evento: (Día) DD Mes YYYY\"\n  const namedMatch = text.match(\n    new RegExp(`(?:Event date|Fecha del evento):\\\\s*\\\\([^)]+\\\\)\\\\s*(\\\\d{1,2})\\\\s+(${monthPattern})\\\\s+(\\\\d{4})`, 'i')\n  );\n  if (namedMatch) {\n    const m = months[namedMatch[2].toLowerCase()];\n    if (m) return { year: namedMatch[3], month: m, day: String(parseInt(namedMatch[1])).padStart(2, '0') };\n  }\n\n  // 3) Fallback: \"(Día) DD Mes YYYY\" sin prefijo\n  const fallback = text.match(\n    new RegExp(`\\\\([^)]+\\\\)\\\\s*(\\\\d{1,2})\\\\s+(${monthPattern})\\\\s+(\\\\d{4})`, 'i')\n  );\n  if (fallback) {\n    const m = months[fallback[2].toLowerCase()];\n    if (m) return { year: fallback[3], month: m, day: String(parseInt(fallback[1])).padStart(2, '0') };\n  }\n\n  return null;\n}\n\nconst results = [];\n\nfor (const item of items) {\n  // Prioridad: text (completo) > html (sin tags) > snippet (truncado)\n  const fullText = item.json.text \n    || (item.json.html ? item.json.html.replace(/<[^>]+>/g, ' ') : '') \n    || item.json.snippet \n    || '';\n\n  const date = extractDate(fullText);\n\n  if (!date) continue;\n\n  const labelName = `Turitop/${date.year}/${date.month}/${date.day}`;\n\n  results.push({\n    json: {\n      messageId: item.json.id,\n      labelName: labelName,\n      subject: item.json.subject || item.json.Subject,\n      from: item.json.from?.text || item.json.From,\n      date: item.json.internalDate,\n      year: date.year,\n      month: date.month,\n      day: date.day\n    }\n  });\n}\n\nif (results.length === 0) {\n  throw new Error('Ningún email del batch contenía fecha de evento válida');\n}\n\nreturn results;"
+      },
+      "id": "3ec4010b-4750-4419-928c-d3797d83b9c4",
+      "name": "Extraer Fecha",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "id": "d099d281-2625-4f1a-98f5-2645a8388a21",
+      "name": "Listar Etiquetas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -96,
+        -96
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Buscar si la etiqueta destino ya existe\nconst items = $input.all();\nconst labelsResponse = items[0].json;\nconst extractData = $node[\"Extraer Fecha\"].json;\n\nconst targetLabel = extractData.labelName;\nconst messageId = extractData.messageId;\nconst labels = labelsResponse.labels || [];\n\n// Buscar la etiqueta exacta\nconst found = labels.find(l => l.name === targetLabel);\n\nreturn [{\n  json: {\n    labelId: found ? found.id : null,\n    labelExists: found ? true : false,\n    labelName: targetLabel,\n    messageId: messageId\n  }\n}];"
+      },
+      "id": "daf0c809-f179-480c-9dc9-bb8864d31fba",
+      "name": "Buscar Etiqueta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-label-exists",
+              "leftValue": "={{ $json.labelExists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "75a1ddc0-c38f-418c-95af-0446f58cd38a",
+      "name": "Etiqueta Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        352,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: $json.labelName, labelListVisibility: 'labelShow', messageListVisibility: 'show' }) }}",
+        "options": {}
+      },
+      "id": "47b99252-2e3f-469c-9e94-a2335281c091",
+      "name": "Crear Etiqueta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        576,
+        -16
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combinar el ID de la etiqueta recién creada con el messageId original\nconst created = $input.first().json;\nconst searchData = $node[\"Buscar Etiqueta\"].json;\n\nreturn [{\n  json: {\n    labelId: created.id,\n    messageId: searchData.messageId,\n    labelName: created.name\n  }\n}];"
+      },
+      "id": "8a6bd594-8dff-49f9-ae90-c16adcaea580",
+      "name": "Preparar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.messageId }}/modify",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ addLabelIds: [$json.labelId] }) }}",
+        "options": {}
+      },
+      "id": "3b4b1304-ef78-419c-9b3b-5c1c5c604ad5",
+      "name": "Aplicar Etiqueta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1024,
+        -96
+      ],
+      "retryOnFail": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        96
+      ],
+      "id": "af239401-8e7f-45f1-9c13-75f8508a0ec2",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        -96
+      ],
+      "id": "5b962cbd-9819-47f7-8f73-51cea0531e21",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -768,
+        0
+      ],
+      "id": "6f4ec610-4d10-486f-9d4a-6c5200f8a9e2",
+      "name": "Get a message",
+      "webhookId": "2665b984-550a-44d4-aa66-320826aa822c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Wi74WqsoVK0dcdoV",
+          "name": "Gmail Info"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Turitop?": {
+      "main": [
+        [
+          {
+            "node": "Extraer Fecha",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Fecha": {
+      "main": [
+        [
+          {
+            "node": "Listar Etiquetas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar Etiquetas": {
+      "main": [
+        [
+          {
+            "node": "Buscar Etiqueta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Etiqueta": {
+      "main": [
+        [
+          {
+            "node": "Etiqueta Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Etiqueta Existe?": {
+      "main": [
+        [
+          {
+            "node": "Aplicar Etiqueta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crear Etiqueta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Etiqueta": {
+      "main": [
+        [
+          {
+            "node": "Preparar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Datos": {
+      "main": [
+        [
+          {
+            "node": "Aplicar Etiqueta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar Etiqueta": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "Es Turitop?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "91f7c8eb-4a29-414e-911f-3640d1baf34c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3ac44b0c3200dc03fd0de80130701e426dbfe2a3d7f56e3ab08ea9609244d149"
+  },
+  "nodeGroups": [],
+  "id": "NEx8h60SEgcdiNNY",
+  "tags": []
+}
