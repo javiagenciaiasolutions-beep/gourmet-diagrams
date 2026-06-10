@@ -126,7 +126,37 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===== EVALUAR RESULTADO DEL LOOKUP =====\nconst items = $input.all();\nconst parseData = $node[\"Parsear Datos\"].json;\n\nconst sheetRow = items[0]?.json || {};\nconst hasCalendarId = !!sheetRow.calendar_event_id;\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId: sheetRow.calendar_event_id || '',\n    eventoExiste: hasCalendarId,\n    currentPersonas: parseInt(sheetRow.total_personas || 0),\n    cupoTotal: parseInt(sheetRow.cupo_total || 30),\n    cupoPorGuia: parseInt(sheetRow.cupo_por_guia || 15),\n    guiaConfirmado: sheetRow.guia_confirmado || '',\n    guiasPendientes: sheetRow.guias_pendientes || '',\n    statusEvento: sheetRow.status || 'open',\n    rowNumber: sheetRow['__rowNumber'] || ''\n  }\n}];"
+        "operation": "read",
+        "documentId": {
+          "mode": "url",
+          "value": "=REPLACE_CON_URL_SPREADSHEET"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "reservas"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "booking_id",
+              "lookupValue": "={{ $node['Parsear Datos'].json.bookingId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4e5f6a7-b8c9-0123-def4-567890abcdef",
+      "name": "Buscar Reserva en Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -4624,
+        1008
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== EVALUAR RESULTADO DEL LOOKUP =====\n// Recibe datos de Buscar Reserva en Sheet (booking_id lookup en Reservas)\n// Tiene acceso a: $node[\"Buscar Evento en Sheet\"] y $node[\"Parsear Datos\"]\n\nconst parseData = $node[\"Parsear Datos\"].json;\nconst eventData = $node[\"Buscar Evento en Sheet\"].json;\nconst reservaItems = $input.all(); // resultado de Buscar Reserva en Sheet\n\nconst sheetRow = eventData || {};\nconst hasCalendarId = !!sheetRow.calendar_event_id;\n\n// Detectar si este booking_id ya existe en Reservas (Turitop2 = duplicado)\nconst reservaEncontrada = reservaItems.length > 0;\nconst reservaExistente = reservaEncontrada ? reservaItems[0].json : null;\nconst bookingIdDuplicado = reservaEncontrada && reservaExistente?.booking_id === parseData.bookingId;\nconst originalPersonas = bookingIdDuplicado ? parseInt(reservaExistente.people || 0) : 0;\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId: sheetRow.calendar_event_id || '',\n    eventoExiste: hasCalendarId,\n    currentPersonas: parseInt(sheetRow.total_personas || 0),\n    cupoTotal: parseInt(sheetRow.cupo_total || 30),\n    cupoPorGuia: parseInt(sheetRow.cupo_por_guia || 15),\n    guiaConfirmado: sheetRow.guia_confirmado || '',\n    guiasPendientes: sheetRow.guias_pendientes || '',\n    statusEvento: sheetRow.status || 'open',\n    rowNumber: sheetRow['__rowNumber'] || '',\n    esBookingDuplicado: bookingIdDuplicado,\n    originalPersonas: originalPersonas\n  }\n}];"
       },
       "id": "aae9b433-a941-414b-916b-a48918e0fafc",
       "name": "Evaluar Lookup",
@@ -241,7 +271,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===== CONSOLIDAR DATOS DE AMBOS CAMINOS =====\n// Camino A (TRUE): evento existía → viene de Evaluar Lookup\n// Camino B (FALSE): evento nuevo → viene de Registrar Mapa Evento\n//   pero el calendarEventId lo tomamos de Crear Evento Calendar\n\nconst item = $input.first().json;\nconst parseData = $node[\"Parsear Datos\"].json;\n\nlet calendarEventId = '';\nlet currentPersonas = 0;\nlet cupoTotal = 30;\nlet cupoPorGuia = 15;\nlet guiaConfirmado = '';\nlet guiasPendientes = '';\n\nif (item.eventoExiste === true || item.calendarEventId) {\n  // Camino A: evento existente, datos completos desde el Sheet\n  calendarEventId = item.calendarEventId || '';\n  currentPersonas = parseInt(item.currentPersonas || 0);\n  cupoTotal = parseInt(item.cupoTotal || 30);\n  cupoPorGuia = parseInt(item.cupoPorGuia || 15);\n  guiaConfirmado = item.guiaConfirmado || '';\n  guiasPendientes = item.guiasPendientes || '';\n} else {\n  // Camino B: evento recién creado\n  // El ID del evento Calendar viene del nodo Crear Evento Calendar\n  try {\n    calendarEventId = $node[\"Crear Evento Calendar\"].json.id || '';\n  } catch(e) {\n    calendarEventId = '';\n  }\n  currentPersonas = 0;\n  cupoTotal = 30;\n  cupoPorGuia = 15;\n  guiaConfirmado = '';\n  guiasPendientes = '';\n}\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId,\n    currentPersonas,\n    cupoTotal,\n    cupoPorGuia,\n    guiaConfirmado,\n    guiasPendientes\n  }\n}];"
+        "jsCode": "// ===== CONSOLIDAR DATOS DE AMBOS CAMINOS =====\n// Camino A (TRUE): evento existía → viene de Evaluar Lookup\n// Camino B (FALSE): evento nuevo → viene de Registrar Mapa Evento\n//   pero el calendarEventId lo tomamos de Crear Evento Calendar\n\nconst item = $input.first().json;\nconst parseData = $node[\"Parsear Datos\"].json;\n\nlet calendarEventId = '';\nlet currentPersonas = 0;\nlet cupoTotal = 30;\nlet cupoPorGuia = 15;\nlet guiaConfirmado = '';\nlet guiasPendientes = '';\n\nif (item.eventoExiste === true || item.calendarEventId) {\n  // Camino A: evento existente, datos completos desde el Sheet\n  calendarEventId = item.calendarEventId || '';\n  currentPersonas = parseInt(item.currentPersonas || 0);\n  cupoTotal = parseInt(item.cupoTotal || 30);\n  cupoPorGuia = parseInt(item.cupoPorGuia || 15);\n  guiaConfirmado = item.guiaConfirmado || '';\n  guiasPendientes = item.guiasPendientes || '';\n  esBookingDuplicado = item.esBookingDuplicado === true;\n  originalPersonas = parseInt(item.originalPersonas || 0);\n} else {\n  // Camino B: evento recién creado\n  try {\n    calendarEventId = $node[\"Crear Evento Calendar\"].json.id || '';\n  } catch(e) {\n    calendarEventId = '';\n  }\n  currentPersonas = 0;\n  cupoTotal = 30;\n  cupoPorGuia = 15;\n  guiaConfirmado = '';\n  guiasPendientes = '';\n}\n\nreturn [{\n  json: {\n    ...parseData,\n    calendarEventId,\n    currentPersonas,\n    cupoTotal,\n    cupoPorGuia,\n    guiaConfirmado,\n    guiasPendientes,\n    esBookingDuplicado,\n    originalPersonas\n  }\n}];"
       },
       "id": "ec8f8cb8-d782-4298-b025-0756647454eb",
       "name": "Consolidar Datos",
@@ -250,6 +280,39 @@
       "position": [
         -3728,
         1104
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-duplicado",
+              "leftValue": "={{ $json.esBookingDuplicado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef01",
+      "name": "¿Reserva Duplicada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3504,
+        1008
       ]
     },
     {
@@ -302,7 +365,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// ===== CALCULAR CUPOS, TÍTULO Y VALIDACIONES =====\nconst parseData = $node[\"Consolidar Datos\"].json;\n\nconst eventType = parseData.eventType;\nconst currentTotal = parseData.currentPersonas;\nconst newPersonas = parseData.totalPersonas;\n\n// Calcular nuevo total según tipo de evento\nlet updatedTotal;\nswitch (eventType) {\n  case 'cancel':\n    updatedTotal = Math.max(0, currentTotal - newPersonas);\n    break;\n  case 'modify':\n    // El 2º email Turitop (via calendar-mod) ya contiene el total correcto\n    // La Classification ya marcó el 1er email como superseded\n    updatedTotal = newPersonas;\n    break;\n  default: // booking\n    updatedTotal = currentTotal + newPersonas;\n}\n\nconst cupoTotal = parseData.cupoTotal;\nconst cupoPorGuia = parseData.cupoPorGuia;\nconst guiaConfirmado = parseData.guiaConfirmado;\nconst guiasPendientes = parseData.guiasPendientes;\n\n// Guías\nconst numGuiasConfirmados = guiaConfirmado ? 1 : 0;\nconst listaPendientes = guiasPendientes ? guiasPendientes.split(',').map(g => g.trim()) : [];\nconst numGuiasTotal = numGuiasConfirmados + listaPendientes.length;\nconst guiasNecesarios = Math.ceil(updatedTotal / cupoPorGuia);\n\n// Flags de validación\nconst cupoTotalAlcanzado = updatedTotal >= cupoTotal;\nconst cupoGuiaSuperado = updatedTotal > (cupoPorGuia * Math.max(numGuiasConfirmados, 1));\nconst hayPendientes = listaPendientes.length > 0;\nconst necesitaMasGuias = guiasNecesarios > numGuiasTotal;\n\n// Título del evento en Calendar\nlet nuevoTitulo = `${parseData.tourCode} ${updatedTotal}`;\nif (guiaConfirmado) nuevoTitulo += ` ${guiaConfirmado}`;\nif (hayPendientes) nuevoTitulo += ` (${guiasPendientes})`;\n\n// Descripción detallada\nconst descripcion = [\n  `📊 Personas: ${updatedTotal}/${cupoTotal}`,\n  `👤 Guía confirmado: ${guiaConfirmado || 'Sin asignar'}`,\n  `⏳ Guías pendientes: ${guiasPendientes || 'Ninguno'}`,\n  `🔢 Guías necesarios: ${guiasNecesarios}`,\n  `📦 Producto Turitop: ${parseData.productId}`,\n  `---`,\n  `Última reserva: ${parseData.clienteNombre} (${newPersonas} pax)`,\n  `Actualizado: ${parseData.timestamp}`\n].join('\\n');\n\nreturn [{\n  json: {\n    ...parseData,\n    updatedTotal,\n    cupoTotalAlcanzado,\n    cupoGuiaSuperado,\n    necesitaMasGuias,\n    hayPendientes,\n    guiasNecesarios,\n    nuevoTitulo,\n    descripcion,\n    listaPendientes\n  }\n}];"
+        "jsCode": "// ===== CALCULAR CUPOS, TÍTULO Y VALIDACIONES =====\nconst parseData = $node[\"Consolidar Datos\"].json;\n\nconst eventType = parseData.eventType;\nconst currentTotal = parseData.currentPersonas;\nconst newPersonas = parseData.totalPersonas;\n\n// Calcular nuevo total según tipo de evento\nlet updatedTotal;\nswitch (eventType) {\n  case 'cancel':\n    updatedTotal = Math.max(0, currentTotal - newPersonas);\n    break;\n  case 'modify':\n    // El 2º email Turitop (via calendar-mod) ya contiene el total correcto\n    // La Classification ya marcó el 1er email como superseded\n    updatedTotal = newPersonas;\n    break;\n  default: // booking\n    if (parseData.esBookingDuplicado && parseData.originalPersonas > 0) {\n      // Turitop2: mismo booking_id ya procesado. Reemplazar contribución.\n      // currentTotal incluye el valor antiguo de este booking.\n      // Restamos el antiguo y sumamos el nuevo.\n      updatedTotal = Math.max(0, currentTotal - parseData.originalPersonas + newPersonas);\n    } else {\n      // Turitop1: reserva nueva, sumar al total\n      updatedTotal = currentTotal + newPersonas;\n    }\n}\n\nconst cupoTotal = parseData.cupoTotal;\nconst cupoPorGuia = parseData.cupoPorGuia;\nconst guiaConfirmado = parseData.guiaConfirmado;\nconst guiasPendientes = parseData.guiasPendientes;\n\n// Guías\nconst numGuiasConfirmados = guiaConfirmado ? 1 : 0;\nconst listaPendientes = guiasPendientes ? guiasPendientes.split(',').map(g => g.trim()) : [];\nconst numGuiasTotal = numGuiasConfirmados + listaPendientes.length;\nconst guiasNecesarios = Math.ceil(updatedTotal / cupoPorGuia);\n\n// Flags de validación\nconst cupoTotalAlcanzado = updatedTotal >= cupoTotal;\nconst cupoGuiaSuperado = updatedTotal > (cupoPorGuia * Math.max(numGuiasConfirmados, 1));\nconst hayPendientes = listaPendientes.length > 0;\nconst necesitaMasGuias = guiasNecesarios > numGuiasTotal;\n\n// Título del evento en Calendar\nlet nuevoTitulo = `${parseData.tourCode} ${updatedTotal}`;\nif (guiaConfirmado) nuevoTitulo += ` ${guiaConfirmado}`;\nif (hayPendientes) nuevoTitulo += ` (${guiasPendientes})`;\n\n// Descripción detallada\nconst descripcion = [\n  `📊 Personas: ${updatedTotal}/${cupoTotal}`,\n  `👤 Guía confirmado: ${guiaConfirmado || 'Sin asignar'}`,\n  `⏳ Guías pendientes: ${guiasPendientes || 'Ninguno'}`,\n  `🔢 Guías necesarios: ${guiasNecesarios}`,\n  `📦 Producto Turitop: ${parseData.productId}`,\n  `---`,\n  `Última reserva: ${parseData.clienteNombre} (${newPersonas} pax)`,\n  `Actualizado: ${parseData.timestamp}`\n].join('\\n');\n\nreturn [{\n  json: {\n    ...parseData,\n    updatedTotal,\n    cupoTotalAlcanzado,\n    cupoGuiaSuperado,\n    necesitaMasGuias,\n    hayPendientes,\n    guiasNecesarios,\n    nuevoTitulo,\n    descripcion,\n    listaPendientes\n  }\n}];"
       },
       "id": "e5bb088d-4bb5-4530-9661-3f9149040834",
       "name": "Calcular Cupos",
@@ -590,6 +653,17 @@
       "main": [
         [
           {
+            "node": "Buscar Reserva en Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Reserva en Sheet": {
+      "main": [
+        [
+          {
             "node": "Evaluar Lookup",
             "type": "main",
             "index": 0
@@ -650,6 +724,24 @@
     },
     "Consolidar Datos": {
       "main": [
+        [
+          {
+            "node": "¿Reserva Duplicada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Reserva Duplicada?": {
+      "main": [
+        [
+          {
+            "node": "Calcular Cupos",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Registrar Reserva",

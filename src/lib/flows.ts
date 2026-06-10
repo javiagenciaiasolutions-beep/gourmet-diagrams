@@ -78,6 +78,71 @@ const PROJECTS = [
           "",
           "Output: {tour, personas, guia_confirmado, guias_pendientes[]}",
         ],
+        continuation: "→ Siguiente: Buscar Evento en Sheet",
+      },
+      {
+        id: "c2-buscar-evento",
+        type: "action",
+        title: "Buscar Evento en Sheet",
+        subtitle:
+          "Busca el evento en Sheet Eventos por product_short_id + fecha. Si existe, es que ya se recibió un webhook previo.",
+        api: ["Google Sheets", "n8n"],
+        details: [
+          "Lookup en Sheet Eventos por product_short_id + fecha",
+          "Si existe → evento ya creado (Turitop2 o modificación)",
+          "Si no existe → evento nuevo (Turitop1)",
+        ],
+        continuation: "→ Siguiente: Buscar Reserva en Sheet",
+      },
+      {
+        id: "c2-buscar-reserva",
+        type: "action",
+        title: "Buscar Reserva en Sheet",
+        subtitle:
+          "Busca en Sheet reservas si este booking_id ya fue procesado (Turitop2 con datos corregidos).",
+        api: ["Google Sheets", "n8n"],
+        details: [
+          "Lookup en Sheet reservas por booking_id",
+          "Si existe → es Turitop2: mismo booking_id llegó antes con otros datos",
+          "  Ej: G193-260607-4 llegó 1ª vez con 4 pax, ahora llega con 5 pax",
+          "  Se actualiza el total restando el anterior y sumando el nuevo",
+          "Si no existe → es Turitop1: reserva nueva, se suma al total",
+          "Tras el lookup de Turitop1 (4 pax) llega GYG y luego Turitop2 (5 pax)",
+        ],
+        continuation: "→ Siguiente: ¿Booking duplicado?",
+      },
+      {
+        id: "c2-duplicado",
+        type: "decision",
+        title: "¿Booking duplicado?",
+        subtitle:
+          "Si el booking_id ya existe en reservas, es un reemplazo (Turitop2). Se actualiza el total con el delta entre old y new.",
+        api: ["n8n"],
+        details: [
+          "esBookingDuplicado = true → Calcular Cupos: updatedTotal = currentTotal - originalPersonas + newPersonas",
+          "esBookingDuplicado = false → Registrar nueva reserva, sumar al total: updatedTotal = currentTotal + newPersonas",
+          "Ambos caminos convergen en Calcular Cupos y continúan igual",
+        ],
+      },
+      {
+        id: "c2-duplicado-si",
+        type: "branch_yes",
+        branchLabel: "SÍ — Reemplazo",
+        title: "Actualizar total sin duplicar",
+        subtitle:
+          "Booking_id ya existente. Se calcula el delta y se actualiza el total del evento.",
+        api: ["n8n"],
+        continuation: "→ Siguiente: Calcular Cupos (delta)",
+      },
+      {
+        id: "c2-duplicado-no",
+        type: "branch_no",
+        branchLabel: "NO — Nuevo",
+        title: "Registrar y sumar",
+        subtitle:
+          "Booking_id nuevo. Se añade registro en la hoja de reservas y suma al total del evento.",
+        api: ["Google Sheets", "n8n"],
+        continuation: "→ Siguiente: Registrar Reserva + Calcular Cupos",
       },
       {
         id: "c3",
@@ -377,7 +442,7 @@ const PROJECTS = [
       },
 
       // ═══════════════════════════════════════════════════════
-      // SECCIÓN 3: VERIFICACIÓN DE REEMPLAZO (solo Turitop)
+      // SECCIÓN 3: VERIFICACIÓN DE REEMPLAZO (Turitop2)
       // ═══════════════════════════════════════════════════════
       {
         id: "cl-divider-2",
@@ -389,14 +454,14 @@ const PROJECTS = [
         type: "decision",
         title: "¿Es reemplazo de reserva modificada?",
         subtitle:
-          "Busca en Sheet reservas si existe un registro con el mismo customer_name + tour_code + status=superseded para este booking_id.",
+          "Busca en Sheet reservas si existe un registro con mismo customer_name + tour_code + status=superseded.",
         api: ["n8n", "Google Sheets"],
         details: [
+          "Orden real emails: Turitop1 + Webhook (4 pax) → Turitop2 + Webhook (5 pax) → GYG mod",
+          "El 2º webhook Turitop (5 pax) llega antes que el email GYG",
+          "Calendar Sync detecta booking_id duplicado y calcula el delta automáticamente",
+          "Cuando llega el email, la clasificación detecta el cambio vía GYG",
           "Lookup en Sheet reservas: customer_name + status=superseded",
-          "GYG NO tiene código Turitop (G193). La vinculación es por nombre+actividad+fecha",
-          "Si existe → este 2º email Turitop es el reemplazo del 1º",
-          "Si no existe → es una reserva normal sin modificación previa",
-          "Booking_id es el MISMO en Turitop1 y Turitop2 (ej: G193-260607-4)",
         ],
       },
       {
@@ -405,15 +470,15 @@ const PROJECTS = [
         branchLabel: "SÍ — Es reemplazo",
         title: "Llamar webhook calendar-mod",
         subtitle:
-          "Este 2º email Turitop contiene los datos corregidos. Se llama al webhook calendar-mod para actualizar Calendar.",
+          "Se llama a calendar-mod por si Turitop2 no llegó antes (fallback). La actualización principal ya la hizo Calendar Sync al detectar el duplicado.",
         api: ["n8n", "Google Calendar"],
         details: [
-          "HTTP POST a /webhook/calendar-mod con los datos del 2º email",
+          "HTTP POST a /webhook/calendar-mod con datos del 2º email",
           "Body: { booking_id, tour_code, event_date, people, customer_name, event_type: 'modify' }",
-          "El webhook calendar-mod (flujo Calendar Sync) procesa la actualización",
-          "Calendario se actualiza con los datos corregidos (personas, guías, etc.)",
+          "Calendar-mod es FALLBACK: si Turitop2 no llegó via webhook, esta llamada lo procesa",
+          "Normalmente Turitop2 ya fue procesado por Calendar Sync (detección de duplicados)",
         ],
-        continuation: "◼ Finaliza aquí — Calendar actualizado",
+        continuation: "◼ Finaliza aquí",
       },
       {
         id: "cl-replace-no",
